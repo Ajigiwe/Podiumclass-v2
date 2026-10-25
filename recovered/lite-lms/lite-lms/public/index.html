@@ -1,0 +1,479 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Podium - Elevate Your Learning</title>
+    <link rel="manifest" href="./manifest.json">
+    <link rel="apple-touch-icon" href="./icon-192x192.png">
+    <link rel="icon" type="image/png" href="./icon-192x192.png">
+    <meta name="theme-color" content="#1845D4">
+    <meta name="description" content="The premium virtual classroom platform for modern education in Ghana.">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@100..900&family=Outfit:wght@100..900&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/css/podium.css?v=2">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <script src="./js/theme-init.js"></script>
+    
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        .font-serif { font-family: 'Outfit', serif; }
+
+        @keyframes float {
+            0%, 100% { transform: translateY(0); }
+            50% { transform: translateY(-15px); }
+        }
+        .animate-float { animation: float 6s ease-in-out infinite; }
+
+        .reveal {
+            opacity: 0;
+            transform: translateY(30px);
+            transition: opacity 0.7s ease, transform 0.7s ease;
+        }
+        .reveal.visible {
+            opacity: 1;
+            transform: translateY(0);
+        }
+
+        .stat-counter {
+            transition: all 0.6s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+        /* ---------- Auth modal ---------- */
+        .pm-overlay { position: fixed; inset: 0; z-index: 100; display: flex; align-items: center; justify-content: center; padding: 20px; }
+        .pm-overlay[hidden] { display: none; }
+        /* This build ships no global preflight, so scope border-box to the modal. */
+        .pm-overlay, .pm-overlay *, .pm-overlay *::before, .pm-overlay *::after { box-sizing: border-box; }
+        .pm-backdrop { position: absolute; inset: 0; background: rgba(13,13,26,.55); -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px); animation: pm-fade .18s ease-out; }
+        .pm-card { position: relative; width: 100%; max-width: 372px; background: #fff; border: 1px solid #DDE0F0; border-radius: 20px; padding: 30px 26px 24px; text-align: center; box-shadow: 0 24px 60px -12px rgba(13,13,26,.35); animation: pm-rise .22s cubic-bezier(.2,.8,.2,1); }
+        html.dark .pm-card { background: #0f172a; border-color: #1e293b; box-shadow: 0 24px 60px -12px rgba(0,0,0,.7); }
+        .pm-close { position: absolute; top: 12px; right: 12px; width: 32px; height: 32px; display: flex; align-items: center; justify-content: center; border: 0; border-radius: 10px; background: transparent; color: #8888A8; cursor: pointer; transition: background .15s, color .15s; }
+        .pm-close:hover { background: #F5F6FA; color: #0D0D1A; }
+        html.dark .pm-close:hover { background: #1e293b; color: #fff; }
+        .pm-logo { width: 46px; height: 46px; margin: 0 auto 16px; border-radius: 14px; background: #1845D4; display: flex; align-items: center; justify-content: center; box-shadow: 0 10px 24px -8px rgba(24,69,212,.55); }
+        .pm-logo i { color: #fff; font-size: 19px; }
+        .pm-title { font-size: 20px; font-weight: 800; letter-spacing: -.02em; color: #0D0D1A; margin: 0 0 4px; }
+        html.dark .pm-title { color: #fff; }
+        .pm-sub { font-size: 12px; font-weight: 500; color: #8888A8; margin: 0 0 20px; }
+        .pm-error { margin: 0 0 14px; padding: 10px 12px; border-radius: 10px; background: #FEF2F2; border: 1px solid #FECACA; color: #B91C1C; font-size: 11px; font-weight: 600; text-align: left; }
+        html.dark .pm-error { background: rgba(220,38,38,.12); border-color: rgba(220,38,38,.3); color: #FCA5A5; }
+        .pm-google { width: 100%; height: 48px; display: flex; align-items: center; justify-content: center; gap: 10px; border: 1px solid #DDE0F0; border-radius: 12px; background: #fff; color: #1F2937; font-family: inherit; font-size: 13px; font-weight: 600; cursor: pointer; transition: background .15s, border-color .15s, transform .1s; }
+        .pm-google:hover { background: #F8F9FC; border-color: #C9CDE6; }
+        .pm-google:active { transform: scale(.99); }
+        .pm-google[disabled] { opacity: .7; cursor: progress; }
+        html.dark .pm-google { background: #111827; border-color: #1f2937; color: #F1F5F9; }
+        html.dark .pm-google:hover { background: #1a2233; }
+        .pm-google svg { width: 19px; height: 19px; flex: none; }
+        .pm-spin { width: 19px; height: 19px; flex: none; border: 2px solid rgba(136,136,168,.35); border-top-color: #1845D4; border-radius: 50%; animation: pm-spin .7s linear infinite; }
+        .pm-foot { margin: 18px 0 0; font-size: 10px; font-weight: 500; line-height: 1.6; color: #8888A8; }
+        .pm-foot a { color: #1845D4; font-weight: 700; text-decoration: none; }
+        .pm-foot a:hover { text-decoration: underline; }
+        body.pm-locked { overflow: hidden; }
+        @keyframes pm-fade { from { opacity: 0; } to { opacity: 1; } }
+        @keyframes pm-rise { from { opacity: 0; transform: translateY(14px) scale(.97); } to { opacity: 1; transform: none; } }
+        @keyframes pm-spin { to { transform: rotate(360deg); } }
+    </style>
+</head>
+<body class="bg-[#F5F6FA] text-[#0D0D1A] dark:bg-slate-950 dark:text-slate-100 selection:bg-blue-100 selection:text-blue-900 transition-colors duration-200">
+    <!-- Navigation -->
+    <nav id="navbar" class="fixed top-0 left-0 right-0 z-50 transition-all duration-200 py-5">
+        <div class="max-w-6xl mx-auto px-6 flex justify-between items-center">
+            <a href="/" class="flex items-center gap-2">
+                <div class="w-8 h-8 bg-[#1845D4] rounded-lg flex items-center justify-center">
+                    <i class="fas fa-graduation-cap text-white text-sm"></i>
+                </div>
+                <span class="text-lg font-sans font-black text-[#0D0D1A] dark:text-white tracking-tighter">Podium</span>
+            </a>
+
+            <div class="hidden md:flex items-center gap-8">
+                <div id="auth-buttons" class="flex items-center gap-4">
+                    <a href="#features" class="text-[9px] font-bold text-[#8888A8] hover:text-[#1845D4] uppercase tracking-widest transition-colors">Features</a>
+                    <a href="./auth/login.html" data-auth-open="signin" class="text-[9px] font-bold text-[#8888A8] hover:text-[#1845D4] uppercase tracking-widest transition-colors">Sign In</a>
+                    <a href="./auth/signup.html" data-auth-open="signup" class="px-4 py-2 bg-[#0D0D1A] text-white text-[9px] font-bold uppercase tracking-widest rounded-md hover:bg-black transition-all active:scale-95 shadow-lg shadow-black/5">Get Started</a>
+                </div>
+                <button id="theme-toggle" class="p-2 rounded-lg hover:bg-white dark:hover:bg-slate-900 transition-colors border border-transparent">
+                    <i id="theme-icon" class="fas fa-moon text-[#8888A8] dark:text-slate-400"></i>
+                </button>
+            </div>
+
+            <div class="md:hidden flex items-center gap-4">
+                <button id="mobile-menu-btn" class="p-2 text-[#0D0D1A] bg-white rounded-md border border-[#DDE0F0]">
+                    <i class="fas fa-bars"></i>
+                </button>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Mobile Menu -->
+    <div id="mobile-menu" class="fixed inset-0 bg-white z-[60] flex flex-col p-8 transition-transform duration-300 translate-x-full md:hidden">
+        <div class="flex justify-between items-center mb-12">
+            <a href="/" class="font-serif font-black text-[#1845D4] text-lg tracking-tighter">Podium</a>
+            <button id="close-mobile-menu" class="p-2 text-[#0D0D1A] bg-[#F5F6FA] rounded-md"><i class="fas fa-times"></i></button>
+        </div>
+        <div class="flex flex-col gap-6">
+            <a href="#features" class="text-[11px] font-bold text-[#0D0D1A] uppercase tracking-widest">Features</a>
+            <a href="./auth/login.html" data-auth-open="signin" class="text-[11px] font-bold text-[#0D0D1A] uppercase tracking-widest">Sign In</a>
+            <a href="./auth/signup.html" data-auth-open="signup" class="w-full py-4 bg-[#1845D4] text-white text-[11px] font-bold uppercase tracking-widest rounded-xl text-center shadow-lg shadow-blue-600/10">Get Started</a>
+        </div>
+    </div>
+
+    <!-- Hero -->
+    <header class="relative pt-24 pb-8 sm:pt-32 sm:pb-12 lg:pt-48 lg:pb-20 overflow-hidden">
+        <div class="max-w-6xl mx-auto px-6 relative z-10">
+            <div class="grid lg:grid-cols-2 gap-8 sm:gap-12 items-center">
+                <div class="text-left space-y-5 sm:space-y-6">
+                    <span class="inline-flex items-center gap-2 px-2.5 py-1 bg-blue-50 dark:bg-blue-900/20 border border-blue-100 dark:border-blue-800 rounded-md">
+                        <span class="w-1.5 h-1.5 bg-[#1845D4] rounded-full"></span>
+                        <span class="text-[8px] font-black text-[#1845D4] dark:text-blue-400 uppercase tracking-widest">Academic Workbench</span>
+                    </span>
+                    <h1 class="text-4xl sm:text-5xl lg:text-7xl font-sans text-[#0D0D1A] dark:text-white leading-[1.1] sm:leading-[0.95] tracking-tighter">
+                        Virtual Learning <br>
+                        <span class="text-[#1845D4]">Perfected.</span>
+                    </h1>
+                    <p class="text-sm sm:text-base lg:text-lg text-[#444460] dark:text-slate-400 font-medium leading-relaxed max-w-md">
+                        The high-density platform for students and instructors to connect, learn, and document. Built for absolute record integrity.
+                    </p>
+                    <div class="flex flex-wrap gap-3">
+                        <a href="./auth/signup.html" data-auth-open="signup" class="inline-flex items-center justify-center gap-2 px-6 py-3 sm:px-8 sm:py-3.5 bg-[#1845D4] text-white font-bold text-[8px] sm:text-[9px] uppercase tracking-[0.2em] rounded-lg hover:bg-[#0F2FA8] transition-all active:scale-95 shadow-xl shadow-blue-600/10">
+                            Get Started Free
+                        </a>
+                        <a href="./auth/login.html" class="flex items-center gap-2 bg-white dark:bg-slate-900 text-[#0D0D1A] dark:text-white border border-[#DDE0F0] dark:border-slate-800 font-bold text-[8px] sm:text-[9px] uppercase tracking-[0.2em] px-6 py-3 sm:px-8 sm:py-3.5 rounded-lg hover:bg-[#F5F6FA] dark:hover:bg-slate-800 active:scale-95 transition-all shadow-sm">
+                            <i class="fas fa-link text-[10px]"></i> Join by Code
+                        </a>
+                    </div>
+
+                    <!-- Quick Join -->
+                    <div class="pt-2">
+                        <div class="flex items-center gap-2 p-1.5 bg-white dark:bg-slate-900 rounded-xl border border-[#DDE0F0] dark:border-slate-800 shadow-sm max-w-sm">
+                            <input type="text" id="meeting-code-input" placeholder="pod-xxxx-xxxx" class="flex-1 px-3 py-2.5 text-xs font-medium bg-transparent border-none outline-none text-[#0D0D1A] dark:text-white placeholder:text-[#8888A8]" maxlength="14">
+                            <button onclick="joinMeeting()" class="px-4 py-2.5 bg-[#1845D4] text-white text-[8px] font-black uppercase tracking-widest rounded-lg hover:bg-[#0F2FA8] transition-all active:scale-95 whitespace-nowrap">Join</button>
+                        </div>
+                        <p id="join-error" class="text-[9px] text-red-500 font-bold mt-2 ml-1 hidden">Invalid meeting code</p>
+                    </div>
+                </div>
+
+                <div class="relative">
+                    <div class="absolute -top-10 -left-10 w-64 h-64 bg-blue-50 dark:bg-blue-900/10 rounded-full blur-[80px]"></div>
+                    <div class="relative bg-white dark:bg-slate-900 p-3 rounded-2xl shadow-xl border border-[#DDE0F0] dark:border-slate-800 overflow-hidden group">
+                        <div class="aspect-[4/3] bg-[#F5F6FA] dark:bg-slate-950 rounded-xl border border-[#DDE0F0] dark:border-slate-800 flex items-center justify-center relative overflow-hidden">
+                            <div id="hero-slider" class="absolute inset-0 w-full h-full">
+                                <div class="absolute inset-0 w-full h-full transition-opacity duration-1000 opacity-100 slider-image">
+                                    <div class="absolute inset-0 bg-gradient-to-t from-black/80 via-black/30 to-black/20 z-10"></div>
+                                    <img src="./s1.jpg" alt="Student learning" class="absolute inset-0 w-full h-full object-cover">
+                                    <div class="absolute inset-0 z-20 flex flex-col justify-end p-8 text-white">
+                                        <h3 class="text-3xl font-black mb-2 tracking-tight text-white">Learn Anywhere</h3>
+                                        <p class="text-white/90 font-medium max-w-sm">Access your courses and materials from anywhere in the world on any device.</p>
+                                    </div>
+                                </div>
+                                <div class="absolute inset-0 w-full h-full transition-opacity duration-1000 opacity-0 slider-image">
+                                    <div class="absolute inset-0 bg-gradient-to-t from-black/80 via-black/30 to-black/20 z-10"></div>
+                                    <img src="./s2.jpg" alt="Online learning" class="absolute inset-0 w-full h-full object-cover">
+                                    <div class="absolute inset-0 z-20 flex flex-col justify-end p-8 text-white">
+                                        <h3 class="text-3xl font-black mb-2 tracking-tight text-white">Seamless Syncing</h3>
+                                        <p class="text-white/90 font-medium max-w-sm">Pick up right where you left off, no matter where your day takes you.</p>
+                                    </div>
+                                </div>
+                                <div class="absolute inset-0 w-full h-full transition-opacity duration-1000 opacity-0 slider-image">
+                                    <div class="absolute inset-0 bg-gradient-to-t from-black/80 via-black/30 to-black/20 z-10"></div>
+                                    <img src="./s3.jpg" alt="Side by side working" class="absolute inset-0 w-full h-full object-cover">
+                                    <div class="absolute inset-0 z-20 flex flex-col justify-end p-8 text-white">
+                                        <h3 class="text-3xl font-black mb-2 tracking-tight text-white">Collaborate Globally</h3>
+                                        <p class="text-white/90 font-medium max-w-sm">Work alongside your peers efficiently, boosting collective productivity.</p>
+                                    </div>
+                                </div>
+                                <div class="absolute inset-0 w-full h-full transition-opacity duration-1000 opacity-0 slider-image">
+                                    <div class="absolute inset-0 bg-gradient-to-t from-black/80 via-black/30 to-black/20 z-10"></div>
+                                    <img src="./4.png" alt="Connected classroom" class="absolute inset-0 w-full h-full object-cover">
+                                    <div class="absolute inset-0 z-20 flex flex-col justify-end p-8 text-white">
+                                        <h3 class="text-3xl font-black mb-2 tracking-tight text-white">Stay Connected</h3>
+                                        <p class="text-white/90 font-medium max-w-sm">Real-time notifications and updates keep you in sync with your class.</p>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="absolute bottom-4 right-4 flex gap-2 z-10 translate-y-2 group-hover:translate-y-0 transition-all duration-500">
+                                <button class="w-2 h-2 rounded-full bg-white transition-colors slider-dot active shadow-sm"></button>
+                                <button class="w-2 h-2 rounded-full bg-white/50 hover:bg-white transition-colors slider-dot shadow-sm"></button>
+                                <button class="w-2 h-2 rounded-full bg-white/50 hover:bg-white transition-colors slider-dot shadow-sm"></button>
+                                <button class="w-2 h-2 rounded-full bg-white/50 hover:bg-white transition-colors slider-dot shadow-sm"></button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </header>
+
+    <!-- Features -->
+    <section id="features" class="py-16 sm:py-24 bg-white dark:bg-slate-900 border-t border-[#DDE0F0] dark:border-slate-800">
+        <div class="max-w-6xl mx-auto px-6">
+            <div class="text-center mb-12 sm:mb-16 reveal">
+                <span class="text-[9px] font-black text-[#1845D4] uppercase tracking-[0.3em]">Why Podium</span>
+                <h2 class="text-3xl sm:text-4xl lg:text-5xl font-sans font-black text-[#0D0D1A] dark:text-white mt-3 mb-4 tracking-tighter leading-[1.1]">
+                    Everything you need <br>to run a modern classroom
+                </h2>
+                <p class="text-sm sm:text-base text-[#444460] dark:text-slate-400 font-medium max-w-lg mx-auto">
+                    From live video to attendance records, payments to recordings — all in one place.
+                </p>
+            </div>
+            <div class="grid sm:grid-cols-2 lg:grid-cols-4 gap-6">
+                <div class="reveal bg-[#F5F6FA] dark:bg-slate-950 rounded-2xl p-6 sm:p-8 border border-[#DDE0F0] dark:border-slate-800 hover:border-[#1845D4] dark:hover:border-blue-600 transition-all group">
+                    <div class="w-12 h-12 bg-blue-50 dark:bg-blue-900/20 rounded-xl flex items-center justify-center mb-5 group-hover:bg-[#1845D4] transition-colors">
+                        <i class="fas fa-video text-xl text-[#1845D4] group-hover:text-white transition-colors"></i>
+                    </div>
+                    <h3 class="text-sm font-black text-[#0D0D1A] dark:text-white mb-2 tracking-tight">Live Video</h3>
+                    <p class="text-xs text-[#8888A8] dark:text-slate-500 font-medium leading-relaxed">Low-latency WebRTC with 500+ concurrent users. Crystal-clear audio and video.</p>
+                </div>
+                <div class="reveal bg-[#F5F6FA] dark:bg-slate-950 rounded-2xl p-6 sm:p-8 border border-[#DDE0F0] dark:border-slate-800 hover:border-[#1845D4] dark:hover:border-blue-600 transition-all group">
+                    <div class="w-12 h-12 bg-amber-50 dark:bg-amber-900/20 rounded-xl flex items-center justify-center mb-5 group-hover:bg-amber-500 transition-colors">
+                        <i class="fas fa-clipboard-check text-xl text-amber-600 group-hover:text-white transition-colors"></i>
+                    </div>
+                    <h3 class="text-sm font-black text-[#0D0D1A] dark:text-white mb-2 tracking-tight">Attendance Tracking</h3>
+                    <p class="text-xs text-[#8888A8] dark:text-slate-500 font-medium leading-relaxed">Automated verification with PDF exports. Never lose a record again.</p>
+                </div>
+                <div class="reveal bg-[#F5F6FA] dark:bg-slate-950 rounded-2xl p-6 sm:p-8 border border-[#DDE0F0] dark:border-slate-800 hover:border-[#1845D4] dark:hover:border-blue-600 transition-all group">
+                    <div class="w-12 h-12 bg-green-50 dark:bg-green-900/20 rounded-xl flex items-center justify-center mb-5 group-hover:bg-green-500 transition-colors">
+                        <i class="fas fa-mobile-alt text-xl text-green-600 group-hover:text-white transition-colors"></i>
+                    </div>
+                    <h3 class="text-sm font-black text-[#0D0D1A] dark:text-white mb-2 tracking-tight">Mobile Money</h3>
+                    <p class="text-xs text-[#8888A8] dark:text-slate-500 font-medium leading-relaxed">Pay semester fees via MTN MoMo, Vodafone Cash, or Telecel Cash instantly.</p>
+                </div>
+                <div class="reveal bg-[#F5F6FA] dark:bg-slate-950 rounded-2xl p-6 sm:p-8 border border-[#DDE0F0] dark:border-slate-800 hover:border-[#1845D4] dark:hover:border-blue-600 transition-all group">
+                    <div class="w-12 h-12 bg-purple-50 dark:bg-purple-900/20 rounded-xl flex items-center justify-center mb-5 group-hover:bg-purple-500 transition-colors">
+                        <i class="fas fa-users text-xl text-purple-600 group-hover:text-white transition-colors"></i>
+                    </div>
+                    <h3 class="text-sm font-black text-[#0D0D1A] dark:text-white mb-2 tracking-tight">Study Groups</h3>
+                    <p class="text-xs text-[#8888A8] dark:text-slate-500 font-medium leading-relaxed">Create course-specific communities with verified access and shared materials.</p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Footer -->
+    <footer class="py-8 bg-[#0D0D1A] text-white">
+        <div class="max-w-6xl mx-auto px-6 flex flex-col sm:flex-row items-center justify-between gap-4">
+            <div class="flex items-center gap-2">
+                <div class="w-7 h-7 bg-[#1845D4] rounded-lg flex items-center justify-center">
+                    <i class="fas fa-graduation-cap text-white text-xs"></i>
+                </div>
+                <span class="text-sm font-sans font-black text-white tracking-tighter">Podium</span>
+            </div>
+            <p class="text-[9px] font-bold text-slate-500 uppercase tracking-widest">&copy; 2026 Podium LMS</p>
+        </div>
+    </footer>
+
+    <!-- Floating Support -->
+    <div class="fixed bottom-6 right-6 flex flex-col gap-2.5 z-50">
+        <a href="https://wa.me/233550599755" target="_blank" rel="noopener noreferrer" class="w-10 h-10 bg-white border border-[#DDE0F0] rounded-xl shadow-sm flex items-center justify-center text-[#8888A8] hover:text-[#25D366] transition-all active:scale-95 group relative">
+            <i class="fab fa-whatsapp text-lg"></i>
+            <span class="absolute right-full mr-3 px-2 py-1 bg-[#0D0D1A] text-white text-[7px] font-black uppercase tracking-widest rounded-md opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity whitespace-nowrap">WhatsApp</span>
+        </a>
+        <a href="mailto:support@podium.com" class="w-10 h-10 bg-[#1845D4] text-white rounded-xl shadow-lg shadow-blue-600/10 flex items-center justify-center hover:bg-[#0F2FA8] transition-all active:scale-95 group relative">
+            <i class="fas fa-envelope text-sm"></i>
+            <span class="absolute right-full mr-3 px-2 py-1 bg-[#0D0D1A] text-white text-[7px] font-black uppercase tracking-widest rounded-md opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity whitespace-nowrap">Email Support</span>
+        </a>
+    </div>
+
+    <!-- Auth Modal -->
+    <div id="auth-modal" class="pm-overlay" hidden role="dialog" aria-modal="true" aria-labelledby="pm-title">
+        <div class="pm-backdrop" data-auth-close></div>
+        <div class="pm-card" role="document">
+            <button type="button" class="pm-close" data-auth-close aria-label="Close"><i class="fas fa-times"></i></button>
+            <div class="pm-logo"><i class="fas fa-graduation-cap"></i></div>
+            <h2 id="pm-title" class="pm-title">Welcome back</h2>
+            <p id="pm-sub" class="pm-sub">Sign in to access your workspace</p>
+            <div id="pm-error" class="pm-error" hidden><span id="pm-error-text"></span></div>
+            <button type="button" id="pm-google" class="pm-google">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/><path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/><path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/><path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/></svg>
+                <span id="pm-google-label">Continue with Google</span>
+            </button>
+            <p class="pm-foot">By continuing you agree to Podium's <a href="/about.html">terms of use</a>.</p>
+        </div>
+    </div>
+
+    <script type="module">
+        import { auth, onAuthStateChanged, signInWithGoogle } from './js/auth-client.js?v=1';
+        import { isMeetingCode } from './js/meeting-code.js';
+
+        // Navbar Scroll
+        const nav = document.getElementById('navbar');
+        window.addEventListener('scroll', () => {
+            if (window.scrollY > 20) {
+                nav.classList.add('bg-white', 'border-b', 'border-[#DDE0F0]', 'py-2', 'shadow-sm', 'dark:bg-slate-950', 'dark:border-slate-800');
+                nav.classList.remove('bg-transparent', 'py-5');
+            } else {
+                nav.classList.remove('bg-white', 'border-b', 'border-[#DDE0F0]', 'py-2', 'shadow-sm', 'dark:bg-slate-950', 'dark:border-slate-800');
+                nav.classList.add('bg-transparent', 'py-5');
+            }
+        });
+
+        // Auth State
+        onAuthStateChanged(auth, (user) => {
+            const authButtons = document.getElementById('auth-buttons');
+            if (user) {
+                authButtons.innerHTML = '<a href="/dashboard.html" class="px-4 py-2 bg-[#1845D4] text-white text-[9px] font-bold uppercase tracking-widest rounded-md hover:bg-[#0F2FA8] transition-all active:scale-95 shadow-lg shadow-blue-600/10">Dashboard</a>';
+            }
+        });
+
+        // Mobile Menu
+        document.getElementById('mobile-menu-btn')?.addEventListener('click', () => {
+            const menu = document.getElementById('mobile-menu');
+            menu.classList.remove('translate-x-full');
+            document.body.classList.add('overflow-hidden');
+            // Close menu on link click
+            menu.querySelectorAll('a').forEach(link => {
+                link.addEventListener('click', () => {
+                    menu.classList.add('translate-x-full');
+                    document.body.classList.remove('overflow-hidden');
+                });
+            });
+        });
+        document.getElementById('close-mobile-menu')?.addEventListener('click', () => {
+            document.getElementById('mobile-menu').classList.add('translate-x-full');
+            document.body.classList.remove('overflow-hidden');
+        });
+
+        // Hero Slider
+        const sliderImages = document.querySelectorAll('.slider-image');
+        const sliderDots = document.querySelectorAll('.slider-dot');
+        let currentSlide = 0;
+        function goToSlide(index) {
+            sliderImages[currentSlide].classList.replace('opacity-100', 'opacity-0');
+            sliderDots[currentSlide].classList.replace('bg-white', 'bg-white/50');
+            sliderDots[currentSlide].classList.remove('active');
+            currentSlide = index;
+            sliderImages[currentSlide].classList.replace('opacity-0', 'opacity-100');
+            sliderDots[currentSlide].classList.replace('bg-white/50', 'bg-white');
+            sliderDots[currentSlide].classList.add('active');
+        }
+        function nextSlide() { goToSlide((currentSlide + 1) % sliderImages.length); }
+        let slideInterval = setInterval(nextSlide, 4000);
+        sliderDots.forEach((dot, index) => {
+            dot.addEventListener('click', () => { clearInterval(slideInterval); goToSlide(index); slideInterval = setInterval(nextSlide, 4000); });
+        });
+
+        // Meeting Code Join
+        window.joinMeeting = function() {
+            const input = document.getElementById('meeting-code-input');
+            const error = document.getElementById('join-error');
+            const code = input.value.trim();
+            if (!code) {
+                error.textContent = 'Enter a meeting code';
+                error.classList.remove('hidden');
+                return;
+            }
+            if (typeof isMeetingCode === 'function' && !isMeetingCode(code)) {
+                error.textContent = 'Invalid code format (e.g., pod-ab3k-9xmz)';
+                error.classList.remove('hidden');
+                return;
+            }
+            error.classList.add('hidden');
+            window.location.href = '/classroom/' + code.replace(/[\s-]/g, '').replace(/^pod/, '');
+        };
+
+        // Enter key triggers join
+        document.getElementById('meeting-code-input')?.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') joinMeeting();
+        });
+
+        // Scroll reveal
+        const observer = new IntersectionObserver((entries) => {
+            entries.forEach(entry => {
+                if (entry.isIntersecting) {
+                    entry.target.classList.add('visible');
+                }
+            });
+        }, { threshold: 0.15, rootMargin: '0px 0px -50px 0px' });
+
+        document.querySelectorAll('.reveal').forEach(el => observer.observe(el));
+
+        // Stats counter animation
+        const statsObserver = new IntersectionObserver((entries) => {
+            entries.forEach(entry => {
+                if (entry.isIntersecting) {
+                    const el = entry.target;
+                    const target = parseInt(el.dataset.target);
+                    const duration = 1500;
+                    const fps = 30;
+                    const step = target / (duration / (1000 / fps));
+                    let current = 0;
+                    const timer = setInterval(() => {
+                        current += step;
+                        if (current >= target) {
+                            el.textContent = target;
+                            clearInterval(timer);
+                        } else {
+                            el.textContent = Math.floor(current);
+                        }
+                    }, 1000 / fps);
+                    statsObserver.unobserve(el);
+                }
+            });
+        }, { threshold: 0.5 });
+
+        document.querySelectorAll('.stat-counter').forEach(el => statsObserver.observe(el));
+
+        // ---------- Auth modal (in-page Google sign-in) ----------
+        const authModal = document.getElementById('auth-modal');
+        const pmGoogleBtn = document.getElementById('pm-google');
+        const pmGoogleLabel = document.getElementById('pm-google-label');
+        const pmTitle = document.getElementById('pm-title');
+        const pmSub = document.getElementById('pm-sub');
+        const pmError = document.getElementById('pm-error');
+        const pmErrorText = document.getElementById('pm-error-text');
+        let authBusy = false;
+
+        const AUTH_COPY = {
+            signin: { title: 'Welcome back', sub: 'Sign in to access your workspace' },
+            signup: { title: 'Create your account', sub: "Join Ghana's smartest classroom" }
+        };
+
+        function openAuthModal(mode) {
+            const copy = AUTH_COPY[mode] || AUTH_COPY.signin;
+            pmTitle.textContent = copy.title;
+            pmSub.textContent = copy.sub;
+            pmError.hidden = true;
+            authModal.hidden = false;
+            document.body.classList.add('pm-locked');
+            setTimeout(() => pmGoogleBtn.focus(), 50);
+        }
+
+        function closeAuthModal() {
+            if (authBusy) return;
+            authModal.hidden = true;
+            document.body.classList.remove('pm-locked');
+        }
+
+        document.querySelectorAll('[data-auth-open]').forEach(el => {
+            el.addEventListener('click', (e) => {
+                e.preventDefault();
+                openAuthModal(el.getAttribute('data-auth-open'));
+            });
+        });
+
+        authModal.querySelectorAll('[data-auth-close]').forEach(el => el.addEventListener('click', closeAuthModal));
+
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape' && !authModal.hidden) closeAuthModal();
+        });
+
+        pmGoogleBtn.addEventListener('click', async () => {
+            if (authBusy) return;
+            authBusy = true;
+            pmError.hidden = true;
+            pmGoogleBtn.disabled = true;
+            pmGoogleBtn.innerHTML = '<span class="pm-spin"></span><span>Signing you in\u2026</span>';
+            try {
+                await signInWithGoogle('./dashboard.html');
+            } catch (err) {
+                authBusy = false;
+                pmGoogleBtn.disabled = false;
+                pmGoogleBtn.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/><path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/><path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/><path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/></svg><span>' + pmGoogleLabel.textContent + '</span>';
+                pmErrorText.textContent = (err && err.message) ? err.message : 'Sign in failed. Please try again.';
+                pmError.hidden = false;
+            }
+        });
+    </script>
+    <script src="./js/theme-toggle.js"></script>
+</body>
+</html>

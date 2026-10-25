@@ -1,0 +1,929 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Control Panel - Podium</title>
+    <link rel="manifest" href="./manifest.json">
+    <link rel="apple-touch-icon" href="./icon-192x192.png">
+    <link rel="icon" type="image/png" href="./icon-192x192.png">
+    <meta name="theme-color" content="#1845D4">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@100..900&family=Outfit:wght@100..900&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/css/podium.css?v=2">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <script src="./js/theme-init.js"></script>
+    
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        .font-serif { font-family: 'Outfit', serif; }
+        .sidebar-active { background-color: #E8EEFF; color: #1845D4; font-weight: 800; }
+        ::-webkit-scrollbar { width: 4px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: #DDE0F0; border-radius: 10px; }
+        .skeleton { background: linear-gradient(90deg, #F5F6FA 25%, #E8EEFF 50%, #F5F6FA 75%); background-size: 200% 100%; animation: shimmer 1.5s infinite; border-radius: 6px; }
+        @keyframes shimmer { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
+    </style>
+</head>
+<body class="bg-[#F5F6FA] text-[#0D0D1A] dark:bg-slate-950 dark:text-slate-100 min-h-screen transition-colors duration-200">
+<div class="min-h-screen flex">
+
+    <!-- Sidebar -->
+    <aside id="sidebar" class="hidden lg:flex w-64 flex-col fixed inset-y-0 bg-white dark:bg-slate-950 border-r border-[#DDE0F0] dark:border-slate-800 z-50 transition-transform duration-300 -translate-x-full lg:translate-x-0">
+        <div class="lg:hidden absolute top-4 right-4">
+            <button id="close-mobile-menu" class="p-2 text-[#8888A8] hover:text-[#0D0D1A]"><i class="fas fa-times"></i></button>
+        </div>
+        <a href="/dashboard.html" class="h-16 px-6 flex items-center gap-2.5 border-b border-[#DDE0F0] dark:border-slate-800">
+            <div class="w-8 h-8 bg-[#1845D4] rounded-lg flex items-center justify-center"><i class="fas fa-graduation-cap text-white text-sm"></i></div>
+            <span class="font-sans font-black text-lg text-[#0D0D1A] dark:text-white tracking-tight">Podium</span>
+            <span class="ml-auto px-2 py-0.5 bg-red-50 dark:bg-red-900/20 border border-red-100 dark:border-red-900/30 rounded text-[8px] font-black text-red-600 uppercase tracking-widest">Admin</span>
+        </a>
+
+        <nav class="flex-1 px-4 py-6 overflow-y-auto space-y-6">
+            <div>
+                <p class="px-2 mb-1 text-[10px] font-black text-[#8888A8] uppercase tracking-[0.15em]">Control Panel</p>
+                <div class="space-y-0.5">
+                    <button onclick="switchAdminTab('dashboard')" id="nav-dashboard" class="admin-nav w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-[13px] font-semibold transition-all sidebar-active">
+                        <span class="nav-icon w-8 h-8 rounded-lg flex items-center justify-center bg-[#1845D4] text-white shadow-sm"><i class="fas fa-tachometer-alt text-xs"></i></span>
+                        <span class="flex-1 text-left">Dashboard</span>
+                    </button>
+                    <button onclick="switchAdminTab('sessions')" id="nav-sessions" class="admin-nav w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-[13px] font-semibold transition-all text-[#444460] dark:text-slate-400 hover:bg-[#F5F6FA] dark:hover:bg-slate-800 hover:text-[#0D0D1A] dark:hover:text-white">
+                        <span class="nav-icon w-8 h-8 rounded-lg flex items-center justify-center bg-emerald-50 dark:bg-emerald-900/20 text-emerald-600 transition-colors"><i class="fas fa-broadcast-tower text-xs"></i></span>
+                        <span class="flex-1 text-left">Sessions</span>
+                    </button>
+                    <button onclick="switchAdminTab('users')" id="nav-users" class="admin-nav w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-[13px] font-semibold transition-all text-[#444460] dark:text-slate-400 hover:bg-[#F5F6FA] dark:hover:bg-slate-800 hover:text-[#0D0D1A] dark:hover:text-white">
+                        <span class="nav-icon w-8 h-8 rounded-lg flex items-center justify-center bg-purple-50 dark:bg-purple-900/20 text-purple-600 transition-colors"><i class="fas fa-users text-xs"></i></span>
+                        <span class="flex-1 text-left">Users</span>
+                    </button>
+                    <button onclick="switchAdminTab('revenue')" id="nav-revenue" class="admin-nav w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-[13px] font-semibold transition-all text-[#444460] dark:text-slate-400 hover:bg-[#F5F6FA] dark:hover:bg-slate-800 hover:text-[#0D0D1A] dark:hover:text-white">
+                        <span class="nav-icon w-8 h-8 rounded-lg flex items-center justify-center bg-amber-50 dark:bg-amber-900/20 text-amber-600 transition-colors"><i class="fas fa-coins text-xs"></i></span>
+                        <span class="flex-1 text-left">Revenue</span>
+                    </button>
+                    <button onclick="switchAdminTab('settings')" id="nav-settings" class="admin-nav w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-[13px] font-semibold transition-all text-[#444460] dark:text-slate-400 hover:bg-[#F5F6FA] dark:hover:bg-slate-800 hover:text-[#0D0D1A] dark:hover:text-white">
+                        <span class="nav-icon w-8 h-8 rounded-lg flex items-center justify-center bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 transition-colors"><i class="fas fa-cog text-xs"></i></span>
+                        <span class="flex-1 text-left">Settings</span>
+                    </button>
+
+                </div>
+            </div>
+        </nav>
+
+        <div class="p-4 border-t border-[#DDE0F0] dark:border-slate-800 space-y-2">
+            <a href="/dashboard.html" class="w-full flex items-center gap-3 px-3 py-2 rounded-lg text-[12px] font-semibold text-[#8888A8] hover:bg-[#F5F6FA] dark:hover:bg-slate-800 transition-all">
+                <i class="fas fa-arrow-left w-4 h-4"></i> Back to Dashboard
+            </a>
+            <button id="theme-toggle" class="w-full flex items-center gap-3 px-3 py-2 rounded-lg text-[12px] font-semibold text-[#8888A8] hover:bg-[#F5F6FA] dark:hover:bg-slate-800 transition-all">
+                <i id="theme-icon" class="fas fa-moon w-4 h-4"></i> Toggle theme
+            </button>
+            <button id="admin-logout-btn" class="w-full flex items-center gap-3 px-3 py-2 rounded-lg text-[12px] font-semibold text-[#8888A8] hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 transition-all">
+                <i class="fas fa-sign-out-alt w-4 h-4"></i> Sign out
+            </button>
+        </div>
+    </aside>
+
+    <!-- Sidebar Overlay (Mobile) -->
+    <div id="sidebar-overlay" class="fixed inset-0 bg-[#0D0D1A]/40 backdrop-blur-sm z-40 hidden lg:hidden"></div>
+
+    <!-- Mobile Header -->
+    <div class="lg:hidden fixed top-0 left-0 right-0 h-16 bg-white dark:bg-slate-950 border-b border-[#DDE0F0] dark:border-slate-800 flex items-center justify-between px-5 z-40">
+        <span class="font-sans font-black text-[#1845D4] text-lg tracking-tight">Control Panel</span>
+        <button id="mobile-menu-btn" class="p-2 text-[#0D0D1A] dark:text-white bg-[#F5F6FA] dark:bg-slate-800 rounded-lg"><i class="fas fa-bars"></i></button>
+    </div>
+
+    <!-- Main Content -->
+    <main class="flex-1 flex flex-col min-w-0 lg:pl-64 pt-16 lg:pt-0">
+        <div class="max-w-7xl mx-auto w-full p-6 lg:p-8 space-y-8">
+
+            <!-- ============ DASHBOARD TAB ============ -->
+            <div id="tab-dashboard" class="admin-tab space-y-8">
+                <div>
+                    <h1 class="text-2xl lg:text-3xl font-bold text-[#0D0D1A] dark:text-white tracking-tight">Dashboard</h1>
+                    <p class="text-sm text-[#8888A8] font-medium mt-1">Platform overview and live metrics.</p>
+                </div>
+
+                <div class="grid grid-cols-2 lg:grid-cols-4 gap-4">
+                    <div class="p-5 bg-white dark:bg-slate-900 border border-[#DDE0F0] dark:border-slate-800 rounded-2xl">
+                        <div class="flex items-center justify-between mb-3">
+                            <span class="text-[10px] font-black text-[#8888A8] uppercase tracking-widest">Total Users</span>
+                            <div class="w-8 h-8 rounded-lg bg-blue-50 dark:bg-blue-900/20 flex items-center justify-center"><i class="fas fa-users text-blue-500 text-xs"></i></div>
+                        </div>
+                        <p id="stat-total-users" class="text-2xl font-black text-[#0D0D1A] dark:text-white">---</p>
+                    </div>
+                    <div class="p-5 bg-white dark:bg-slate-900 border border-[#DDE0F0] dark:border-slate-800 rounded-2xl">
+                        <div class="flex items-center justify-between mb-3">
+                            <span class="text-[10px] font-black text-[#8888A8] uppercase tracking-widest">Active Sessions</span>
+                            <div class="w-8 h-8 rounded-lg bg-emerald-50 dark:bg-emerald-900/20 flex items-center justify-center"><i class="fas fa-broadcast-tower text-emerald-500 text-xs"></i></div>
+                        </div>
+                        <p id="stat-active-sessions" class="text-2xl font-black text-[#0D0D1A] dark:text-white">---</p>
+                    </div>
+                    <div class="p-5 bg-white dark:bg-slate-900 border border-[#DDE0F0] dark:border-slate-800 rounded-2xl">
+                        <div class="flex items-center justify-between mb-3">
+                            <span class="text-[10px] font-black text-[#8888A8] uppercase tracking-widest">Revenue (GHS)</span>
+                            <div class="w-8 h-8 rounded-lg bg-amber-50 dark:bg-amber-900/20 flex items-center justify-center"><i class="fas fa-coins text-amber-500 text-xs"></i></div>
+                        </div>
+                        <p id="stat-revenue" class="text-2xl font-black text-[#0D0D1A] dark:text-white">---</p>
+                    </div>
+                    <div class="p-5 bg-white dark:bg-slate-900 border border-[#DDE0F0] dark:border-slate-800 rounded-2xl">
+                        <div class="flex items-center justify-between mb-3">
+                            <span class="text-[10px] font-black text-[#8888A8] uppercase tracking-widest">Recordings</span>
+                            <div class="w-8 h-8 rounded-lg bg-rose-50 dark:bg-rose-900/20 flex items-center justify-center"><i class="fas fa-video text-rose-500 text-xs"></i></div>
+                        </div>
+                        <p id="stat-recordings" class="text-2xl font-black text-[#0D0D1A] dark:text-white">---</p>
+                    </div>
+                </div>
+
+                <div class="grid lg:grid-cols-2 gap-6">
+                    <div class="bg-white dark:bg-slate-900 border border-[#DDE0F0] dark:border-slate-800 rounded-2xl p-6">
+                        <h3 class="text-sm font-bold text-[#0D0D1A] dark:text-white mb-4">Active Sessions</h3>
+                        <div id="dashboard-sessions-list" class="space-y-2">
+                            <div class="text-sm text-[#8888A8] text-center py-8">Loading...</div>
+                        </div>
+                    </div>
+                    <div class="bg-white dark:bg-slate-900 border border-[#DDE0F0] dark:border-slate-800 rounded-2xl p-6">
+                        <h3 class="text-sm font-bold text-[#0D0D1A] dark:text-white mb-4">Recent Users</h3>
+                        <div id="dashboard-users-list" class="space-y-2">
+                            <div class="text-sm text-[#8888A8] text-center py-8">Loading...</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- ============ SESSIONS TAB ============ -->
+            <div id="tab-sessions" class="admin-tab hidden space-y-8">
+                <div class="flex flex-col sm:flex-row sm:items-end justify-between gap-4">
+                    <div>
+                        <h2 class="text-2xl lg:text-3xl font-bold text-[#0D0D1A] dark:text-white tracking-tight">Sessions</h2>
+                        <p class="text-sm text-[#8888A8] font-medium mt-1">Monitor and manage active classroom sessions.</p>
+                    </div>
+                    <div class="flex items-center gap-3">
+                        <select id="session-status-filter" class="px-3 py-2 bg-white dark:bg-slate-900 border border-[#DDE0F0] dark:border-slate-800 rounded-lg text-xs font-semibold outline-none">
+                            <option value="all">All Sessions</option>
+                            <option value="active" selected>Active Only</option>
+                            <option value="ended">Ended</option>
+                        </select>
+                        <button onclick="loadSessions()" class="px-4 py-2 bg-[#1845D4] text-white rounded-lg text-[10px] font-bold uppercase tracking-widest hover:bg-[#0F2FA8] transition-all"><i class="fas fa-sync-alt mr-1.5"></i>Refresh</button>
+                    </div>
+                </div>
+                <div id="sessions-list" class="space-y-3">
+                    <div class="text-sm text-[#8888A8] text-center py-12">Loading sessions...</div>
+                </div>
+            </div>
+
+            <!-- ============ USERS TAB ============ -->
+            <div id="tab-users" class="admin-tab hidden space-y-8">
+                <div class="flex flex-col sm:flex-row sm:items-end justify-between gap-4">
+                    <div>
+                        <h2 class="text-2xl lg:text-3xl font-bold text-[#0D0D1A] dark:text-white tracking-tight">User Directory</h2>
+                        <p class="text-sm text-[#8888A8] font-medium mt-1">Manage platform users and their access levels.</p>
+                    </div>
+                </div>
+                <div class="flex flex-col sm:flex-row gap-3">
+                    <input type="text" id="user-search" placeholder="Search by name or email..." class="flex-1 px-4 py-2.5 bg-white dark:bg-slate-900 border border-[#DDE0F0] dark:border-slate-800 rounded-lg text-sm outline-none focus:border-[#1845D4] transition-colors">
+                    <select id="user-role-filter" class="px-3 py-2.5 bg-white dark:bg-slate-900 border border-[#DDE0F0] dark:border-slate-800 rounded-lg text-xs font-semibold outline-none">
+                        <option value="all">All Roles</option>
+                        <option value="student">Students</option>
+                        <option value="verified_student">Verified Students</option>
+                        <option value="lecturer">Lecturers</option>
+                        <option value="admin">Admins</option>
+                    </select>
+                </div>
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-4" id="users-stats">
+                    <div class="p-4 bg-white dark:bg-slate-900 border border-[#DDE0F0] dark:border-slate-800 rounded-xl flex items-center gap-4">
+                        <div class="w-10 h-10 bg-blue-50 dark:bg-blue-900/20 rounded-lg flex items-center justify-center"><i class="fas fa-users text-blue-500 text-sm"></i></div>
+                        <div><p class="text-[10px] font-black text-[#8888A8] uppercase tracking-widest">Total</p><p id="users-total-count" class="text-lg font-bold">---</p></div>
+                    </div>
+                    <div class="p-4 bg-white dark:bg-slate-900 border border-[#DDE0F0] dark:border-slate-800 rounded-xl flex items-center gap-4">
+                        <div class="w-10 h-10 bg-purple-50 dark:bg-purple-900/20 rounded-lg flex items-center justify-center"><i class="fas fa-user-check text-purple-500 text-sm"></i></div>
+                        <div><p class="text-[10px] font-black text-[#8888A8] uppercase tracking-widest">Verified Students</p><p id="users-verified-count" class="text-lg font-bold">---</p></div>
+                    </div>
+                </div>
+                <div class="bg-white dark:bg-slate-900 border border-[#DDE0F0] dark:border-slate-800 rounded-2xl overflow-hidden">
+                    <div class="overflow-x-auto">
+                        <table class="w-full text-left">
+                            <thead class="bg-[#F5F6FA] dark:bg-slate-800 text-[10px] font-black text-[#8888A8] uppercase tracking-widest">
+                                <tr>
+                                    <th class="px-5 py-3">User</th>
+                                    <th class="px-5 py-3 hidden sm:table-cell">Role</th>
+                                    <th class="px-5 py-3 hidden md:table-cell">Joined</th>
+                                    <th class="px-5 py-3 hidden lg:table-cell">Wallet</th>
+                                    <th class="px-5 py-3 w-10"></th>
+                                </tr>
+                            </thead>
+                            <tbody id="users-table-body" class="divide-y divide-[#DDE0F0] dark:divide-slate-800"></tbody>
+                        </table>
+                    </div>
+                    <div id="users-pagination" class="flex items-center justify-between px-5 py-3 border-t border-[#DDE0F0] dark:border-slate-800">
+                        <span id="users-page-label" class="text-xs text-[#8888A8] font-medium"></span>
+                        <div class="flex gap-2">
+                            <button id="users-prev-btn" class="px-3 py-1.5 text-[10px] font-bold uppercase tracking-widest border border-[#DDE0F0] dark:border-slate-700 rounded-lg disabled:opacity-30">Prev</button>
+                            <button id="users-next-btn" class="px-3 py-1.5 text-[10px] font-bold uppercase tracking-widest border border-[#DDE0F0] dark:border-slate-700 rounded-lg disabled:opacity-30">Next</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- ============ REVENUE TAB ============ -->
+            <div id="tab-revenue" class="admin-tab hidden space-y-8">
+                <div>
+                    <h2 class="text-2xl lg:text-3xl font-bold text-[#0D0D1A] dark:text-white tracking-tight">Revenue</h2>
+                    <p class="text-sm text-[#8888A8] font-medium mt-1">Transaction history and payment overview.</p>
+                </div>
+                <div class="grid grid-cols-2 lg:grid-cols-3 gap-4" id="revenue-stats"></div>
+                <div class="bg-white dark:bg-slate-900 border border-[#DDE0F0] dark:border-slate-800 rounded-2xl overflow-hidden">
+                    <div class="overflow-x-auto">
+                        <table class="w-full text-left">
+                            <thead class="bg-[#F5F6FA] dark:bg-slate-800 text-[10px] font-black text-[#8888A8] uppercase tracking-widest">
+                                <tr>
+                                    <th class="px-5 py-3">Transaction</th>
+                                    <th class="px-5 py-3">Amount</th>
+                                    <th class="px-5 py-3 hidden sm:table-cell">Status</th>
+                                    <th class="px-5 py-3 hidden md:table-cell">Date</th>
+                                </tr>
+                            </thead>
+                            <tbody id="revenue-table-body" class="divide-y divide-[#DDE0F0] dark:divide-slate-800"></tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+            <!-- ============ SETTINGS TAB ============ -->
+            <div id="tab-settings" class="admin-tab hidden space-y-8">
+                <div>
+                    <h2 class="text-2xl lg:text-3xl font-bold text-[#0D0D1A] dark:text-white tracking-tight">Settings</h2>
+                    <p class="text-sm text-[#8888A8] font-medium mt-1">Platform configuration.</p>
+                </div>
+                <div class="grid lg:grid-cols-3 gap-6">
+                    <div class="p-6 bg-white dark:bg-slate-900 border border-[#DDE0F0] dark:border-slate-800 rounded-2xl">
+                        <h3 class="text-sm font-bold text-[#0D0D1A] dark:text-white mb-4">Institutional Policy</h3>
+                        <p class="text-xs text-[#8888A8] mb-4">Control access requirements and semester fees.</p>
+                        <div class="space-y-4">
+                            <label class="flex items-center justify-between">
+                                <span class="text-xs font-semibold">Require Payment</span>
+                                <input type="checkbox" id="setting-pay-to-use" class="sr-only peer">
+                                <div class="w-9 h-5 bg-gray-300 rounded-full peer-checked:bg-[#1845D4] relative transition-colors cursor-pointer after:content-[''] after:absolute after:top-0.5 after:left-0.5 after:bg-white after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:after:translate-x-4"></div>
+                            </label>
+                            <div>
+                                <label class="text-xs font-semibold block mb-1">Per-Class Fee (GHS)</label>
+                                <input type="number" id="setting-semester-fee" class="w-full px-4 py-2.5 bg-[#F5F6FA] dark:bg-slate-800 border border-transparent focus:border-[#1845D4] rounded-lg text-sm outline-none transition-all" value="6">
+                            </div>
+                            <button id="save-settings-btn" class="w-full py-2.5 bg-[#1845D4] text-white rounded-lg text-[11px] font-bold uppercase tracking-widest hover:bg-[#0F2FA8] transition-all">Save Settings</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+        </div>
+    </main>
+</div>
+
+<!-- Session Detail Modal -->
+<div id="session-detail-modal" class="hidden fixed inset-0 z-[999] flex items-center justify-center p-4">
+    <div class="absolute inset-0 bg-black/60 backdrop-blur-sm" onclick="closeSessionModal()"></div>
+    <div class="relative bg-white dark:bg-slate-900 border border-[#DDE0F0] dark:border-slate-800 rounded-2xl w-full max-w-lg max-h-[85vh] overflow-hidden shadow-2xl flex flex-col">
+        <div class="p-5 border-b border-[#DDE0F0] dark:border-slate-800 flex items-center justify-between">
+            <h3 id="modal-session-title" class="text-base font-bold text-[#0D0D1A] dark:text-white truncate">Session Details</h3>
+            <button onclick="closeSessionModal()" class="p-2 text-[#8888A8] hover:text-[#0D0D1A] dark:hover:text-white bg-[#F5F6FA] dark:bg-slate-800 rounded-lg transition-colors"><i class="fas fa-times text-sm"></i></button>
+        </div>
+        <div class="flex-1 overflow-y-auto p-5 space-y-5">
+            <div class="grid grid-cols-2 gap-3" id="modal-quick-stats"></div>
+            <div>
+                <h4 class="text-[10px] font-black text-[#8888A8] uppercase tracking-widest mb-3">Participants</h4>
+                <div id="modal-participants-list" class="space-y-2"></div>
+            </div>
+            <div id="modal-refund-section"></div>
+        </div>
+        <div class="p-4 border-t border-[#DDE0F0] dark:border-slate-800 flex gap-3">
+            <button id="modal-refund-btn" class="hidden flex-1 py-2.5 bg-amber-50 text-amber-700 hover:bg-amber-100 dark:bg-amber-900/20 dark:hover:bg-amber-900/30 rounded-xl text-[10px] font-bold uppercase tracking-widest transition-all">Trigger Refund</button>
+            <button id="modal-end-btn" class="flex-1 py-2.5 bg-red-50 text-red-600 hover:bg-red-100 dark:bg-red-900/20 dark:hover:bg-red-900/30 rounded-xl text-[10px] font-bold uppercase tracking-widest transition-all">End Session</button>
+            <button onclick="closeSessionModal()" class="flex-1 py-2.5 bg-[#F5F6FA] dark:bg-slate-800 text-[#8888A8] rounded-xl text-[10px] font-bold uppercase tracking-widest hover:bg-[#DDE0F0] dark:hover:bg-slate-700 transition-all">Close</button>
+        </div>
+    </div>
+</div>
+
+<script src="./js/theme-toggle.js"></script>
+<script type="module">
+    import { auth, db } from './js/firebase-config.js?v=19';
+    import { onAuthStateChanged, signOut } from './js/auth-client.js?v=1';
+    import { collection, query, where, getDocs, doc, getDoc, updateDoc, deleteDoc, setDoc, serverTimestamp, getCountFromServer, orderBy, limit, startAfter, Timestamp } from "./js/pg-firestore.js?v=1";
+
+    let currentUser = null;
+    let allUsers = [];
+    let userPage = 0;
+    const PAGE_SIZE = 20;
+    const ghs = (n) => 'GHS ' + (n / 100).toFixed(2);
+    let walletExpected = {}; // uid -> balance recomputed from succeeded transactions (pesewas)
+
+    // Auth guard
+    onAuthStateChanged(auth, async (user) => {
+        if (!user) { window.location.href = '/auth/login.html'; return; }
+        if (user.status && user.status !== 'active') { window.location.href = '/auth/login.html'; return; }
+        if (user.role !== 'admin') { window.location.href = '/dashboard.html'; return; }
+        currentUser = user;
+        init();
+    });
+
+    document.getElementById('admin-logout-btn')?.addEventListener('click', () => signOut(auth));
+
+    // Sidebar mobile toggle
+    document.getElementById('mobile-menu-btn')?.addEventListener('click', () => {
+        document.getElementById('sidebar').classList.remove('-translate-x-full');
+        document.getElementById('sidebar-overlay').classList.remove('hidden');
+    });
+    document.getElementById('close-mobile-menu')?.addEventListener('click', closeSidebar);
+    document.getElementById('sidebar-overlay')?.addEventListener('click', closeSidebar);
+    function closeSidebar() {
+        document.getElementById('sidebar').classList.add('-translate-x-full');
+        document.getElementById('sidebar-overlay').classList.add('hidden');
+    }
+
+    // Tab switching
+    window.switchAdminTab = (tab) => {
+        document.querySelectorAll('.admin-tab').forEach(t => t.classList.add('hidden'));
+        document.getElementById('tab-' + tab)?.classList.remove('hidden');
+        document.querySelectorAll('.admin-nav').forEach(b => { b.classList.remove('sidebar-active'); b.classList.add('text-[#444460]', 'dark:text-slate-400'); });
+        const nav = document.getElementById('nav-' + tab);
+        if (nav) { nav.classList.add('sidebar-active'); nav.classList.remove('text-[#444460]', 'dark:text-slate-400'); }
+        if (tab === 'dashboard') loadDashboard();
+        if (tab === 'sessions') loadSessions();
+        if (tab === 'users' && allUsers.length === 0) loadUsers();
+        if (tab === 'revenue') loadRevenue();
+        if (tab === 'settings') loadSettings();
+
+    };
+
+    async function init() {
+        loadDashboard();
+    }
+
+    // ===== DASHBOARD =====
+    // Small helper for admin GET endpoints (adds the auth header, parses JSON).
+    async function adminGet(path) {
+        const token = await auth.currentUser.getIdToken();
+        const res = await fetch(path, { headers: { 'Authorization': 'Bearer ' + token } });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || 'Request failed');
+        return data;
+    }
+
+    async function loadDashboard() {
+        // Load each stat independently so one failure doesn't block others
+        try { const snap = await getDocs(query(collection(db, 'profiles'), limit(1))); document.getElementById('stat-total-users').textContent = (await getCountFromServer(collection(db, 'profiles')).catch(() => ({ data: () => ({ count: '?' }) }))).data().count; } catch { document.getElementById('stat-total-users').textContent = '?'; }
+        try { const d = await adminGet('/api/admin/sessions?filter=active'); document.getElementById('stat-active-sessions').textContent = (d.sessions || []).length; } catch { document.getElementById('stat-active-sessions').textContent = '?'; }
+        try { const snap = await getDocs(query(collection(db, 'transactions'), where('status', '==', 'success'))); let t = 0; snap.forEach(d => t += d.data().amount || 0); document.getElementById('stat-revenue').textContent = t.toLocaleString(); } catch { document.getElementById('stat-revenue').textContent = '?'; }
+        try { document.getElementById('stat-recordings').textContent = (await getCountFromServer(collection(db, 'recordings')).catch(() => ({ data: () => ({ count: '?' }) }))).data().count; } catch { document.getElementById('stat-recordings').textContent = '?'; }
+
+        // Active sessions list (via Admin SDK-backed endpoint — same rules issue as the Sessions tab)
+        try {
+            const d = await adminGet('/api/admin/sessions?filter=active');
+            const list = document.getElementById('dashboard-sessions-list');
+            const active = d.sessions || [];
+            if (active.length === 0) {
+                list.innerHTML = '<div class="text-sm text-[#8888A8] text-center py-4">No active sessions</div>';
+            } else {
+                list.innerHTML = active.map((s) => {
+                    return `<div class="flex items-center justify-between p-3 bg-[#F5F6FA] dark:bg-slate-800 rounded-lg">
+                        <div class="min-w-0"><p class="text-xs font-bold truncate">${escHtml(s.title)}</p><p class="text-[9px] text-[#8888A8]">${escHtml(s.lecturerName || '')} &middot; ${s.participantCount || 0} participants</p></div>
+                        <button onclick="openSessionModal('${s.id}')" class="text-[9px] font-bold text-[#1845D4] uppercase tracking-widest shrink-0 ml-3">Audit</button>
+                    </div>`;
+                }).join('');
+            }
+        } catch { document.getElementById('dashboard-sessions-list').innerHTML = '<div class="text-sm text-[#8888A8] text-center py-4">Could not load</div>'; }
+
+        // Recent users
+        try {
+            const recentSnap = await getDocs(query(collection(db, 'profiles'), orderBy('createdAt', 'desc'), limit(5)));
+            const ulist = document.getElementById('dashboard-users-list');
+            ulist.innerHTML = recentSnap.docs.map(d => {
+                const p = d.data();
+                return `<div class="flex items-center gap-3 p-3 bg-[#F5F6FA] dark:bg-slate-800 rounded-lg">
+                    <div class="w-8 h-8 rounded-full bg-[#1845D4] flex items-center justify-center text-white text-[10px] font-bold shrink-0">${(p.fullName || '?')[0].toUpperCase()}</div>
+                    <div class="min-w-0"><p class="text-xs font-bold truncate">${p.fullName}</p><p class="text-[9px] text-[#8888A8]">${p.role || 'student'}</p></div>
+                </div>`;
+            }).join('');
+        } catch { document.getElementById('dashboard-users-list').innerHTML = '<div class="text-sm text-[#8888A8] text-center py-4">Could not load</div>'; }
+    }
+
+    // Helpers shared by the sessions list and audit modal.
+    const REFUND_THRESHOLD_MINUTES = 30;
+    function escHtml(str) {
+        return String(str == null ? '' : str).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+    }
+
+    // ===== SESSIONS =====
+    // Reads go through /api/admin/sessions (Admin SDK) because the client-side
+    // Firestore rules cannot prove list access for these queries.
+    window.loadSessions = async function() {
+        const list = document.getElementById('sessions-list');
+        list.innerHTML = '<div class="text-sm text-[#8888A8] text-center py-12">Loading...</div>';
+        const filter = document.getElementById('session-status-filter')?.value || 'active';
+        try {
+            const token = await auth.currentUser.getIdToken();
+            const res = await fetch('/api/admin/sessions?filter=' + encodeURIComponent(filter), {
+                headers: { 'Authorization': 'Bearer ' + token }
+            });
+            const data = await res.json();
+            if (!res.ok) throw new Error(data.error || 'Failed to load sessions');
+            const sessions = data.sessions || [];
+            if (sessions.length === 0) { list.innerHTML = '<div class="text-sm text-[#8888A8] text-center py-12">No sessions found.</div>'; return; }
+            list.innerHTML = sessions.map((s) => {
+                const ms = s.durationMinutes;
+                const durBadge = ms !== null && ms !== undefined
+                    ? `<span class="px-1.5 py-0.5 rounded font-bold ${s.metThreshold ? 'bg-emerald-50 text-emerald-600 dark:bg-emerald-900/30' : 'bg-amber-50 text-amber-700 dark:bg-amber-900/30'}">${ms} min${s.metThreshold ? '' : ' · under 30m'}</span>`
+                    : '';
+                const refundBadge = s.refundProcessed ? '<span class="px-1.5 py-0.5 rounded font-bold bg-slate-100 text-slate-600 dark:bg-slate-800">refunded</span>' : '';
+                return `<div class="p-4 bg-white dark:bg-slate-900 border border-[#DDE0F0] dark:border-slate-800 rounded-xl flex items-center justify-between gap-4">
+                    <div class="min-w-0">
+                        <div class="flex items-center gap-2 mb-1">
+                            <span class="w-1.5 h-1.5 rounded-full ${s.isActive ? 'bg-emerald-500 animate-pulse' : 'bg-slate-300'}"></span>
+                            <p class="text-sm font-bold truncate">${escHtml(s.title)}</p>
+                        </div>
+                        <div class="flex flex-wrap gap-x-3 gap-y-1 text-[10px] text-[#8888A8] font-medium">
+                            <span>${escHtml(s.lecturerName || '')}</span>
+                            <span>${s.participantCount || 0} joined</span>
+                            ${s.createdAt ? `<span>${new Date(s.createdAt).toLocaleDateString()}</span>` : ''}
+                            ${durBadge}
+                            ${refundBadge}
+                        </div>
+                    </div>
+                    <div class="flex items-center gap-2 shrink-0">
+                        <button onclick="openSessionModal('${s.id}')" class="px-3 py-1.5 bg-[#1845D4] text-white rounded-lg text-[9px] font-bold uppercase tracking-widest">Audit</button>
+                        ${s.isActive ? `<button onclick="endSessionAdmin('${s.id}')" class="px-3 py-1.5 bg-red-50 text-red-600 hover:bg-red-100 rounded-lg text-[9px] font-bold uppercase tracking-widest transition-all">End</button>` : ''}
+                    </div>
+                </div>`;
+            }).join('');
+        } catch (e) { console.error(e); list.innerHTML = '<div class="text-sm text-red-500 text-center py-12">Failed to load: ' + escHtml(e.message || 'unknown error') + '</div>'; }
+    };
+
+    window.endSessionAdmin = async function(sessionId) {
+        if (!confirm('End this session? All participants will be removed.')) return;
+        try {
+            await updateDoc(doc(db, 'sessions', sessionId), { isActive: false, status: 'ended', endedAt: serverTimestamp() });
+            // Trigger auto-refund (sub-30min sessions) with the admin's token
+            try {
+                const token = await auth.currentUser.getIdToken();
+                await fetch('/api/wallet/refund', { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token }, body: JSON.stringify({ sessionId }) });
+            } catch (re) { console.error('Refund trigger failed:', re); }
+            loadSessions();
+            showToast('Session ended.');
+        } catch (e) { showToast('Failed to end session.', 'error'); }
+    };
+
+    // ===== USERS =====
+    async function adminApi(url, options = {}) {
+        const token = await auth.currentUser.getIdToken();
+        return fetch(url, {
+            ...options,
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': 'Bearer ' + token,
+                ...(options.headers || {}),
+            },
+        });
+    }
+
+    function formatUserDate(value) {
+        if (!value) return '---';
+        const date = value.toDate ? value.toDate() : new Date(value);
+        return Number.isNaN(date.getTime()) ? '---' : date.toLocaleDateString();
+    }
+
+    async function loadUsers() {
+        const tbody = document.getElementById('users-table-body');
+        tbody.innerHTML = '<tr><td colspan="5" class="text-center py-12 text-sm text-[#8888A8]">Loading...</td></tr>';
+        try {
+            allUsers = [];
+            walletExpected = {};
+            const response = await adminApi('/api/v2/users');
+            const data = await response.json().catch(() => ({}));
+            if (!response.ok) throw new Error(data.error || 'Failed to load users');
+            allUsers = Array.isArray(data.users) ? data.users : [];
+            document.getElementById('users-total-count').textContent = allUsers.length;
+            const totalStat = document.getElementById('stat-total-users');
+            if (totalStat) totalStat.textContent = String(allUsers.length);
+            document.getElementById('users-verified-count').textContent = allUsers.filter(u => u.role === 'student' && u.isVerified).length;
+            renderUserPage();
+        } catch (e) {
+            console.error(e);
+            tbody.innerHTML = '<tr><td colspan="5" class="text-center py-12 text-sm text-red-500">Could not load users.</td></tr>';
+            showToast('Could not load users: ' + (e.message || e), 'error');
+        }
+    }
+
+    function getFilteredUsers() {
+        const search = (document.getElementById('user-search')?.value || '').toLowerCase();
+        const roleFilter = document.getElementById('user-role-filter')?.value || 'all';
+        return allUsers.filter(u => {
+            const name = (u.fullName || '').toLowerCase();
+            const email = (u.email || '').toLowerCase();
+            const matchesSearch = !search || name.includes(search) || email.includes(search);
+            if (!matchesSearch) return false;
+            if (roleFilter === 'all') return true;
+            if (roleFilter === 'verified_student') return u.role === 'student' && u.isVerified;
+            return u.role === roleFilter;
+        });
+    }
+
+    // Expected wallet balance = recompute from succeeded transactions, mirroring
+    // app/api/wallet/reconcile/route.ts so the badge always agrees with a real reconcile.
+    async function computeExpectedBalances(users) {
+        const missing = users.filter(u => !(u.id in walletExpected)).map(u => u.id);
+        for (let i = 0; i < missing.length; i += 10) {
+            const chunk = missing.slice(i, i + 10);
+            try {
+                const snap = await getDocs(query(collection(db, 'transactions'), where('userId', 'in', chunk)));
+                const sums = {};
+                chunk.forEach(id => sums[id] = 0);
+                snap.forEach(d => {
+                    const t = d.data();
+                    if (t.status !== 'succeeded') return;
+                    if (!(t.userId in sums)) return;
+                    const amt = Number(t.amount) || 0;
+                    if (t.type === 'top_up' || t.type === 'wallet_topup' || t.type === 'refund') sums[t.userId] += amt;
+                    else if (t.type === 'session_payment') sums[t.userId] -= amt;
+                    else if (!t.type && t.sessionId === 'wallet_topup' && amt > 0) sums[t.userId] += amt;
+                });
+                Object.entries(sums).forEach(([id, v]) => { walletExpected[id] = Math.max(0, v); });
+            } catch (e) { console.error('expected balance load failed', e); }
+        }
+    }
+
+    function walletCell(u) {
+        const actual = u.walletBalance != null ? Number(u.walletBalance) : null;
+        const expected = (u.id in walletExpected) ? walletExpected[u.id] : null;
+        let html;
+        if (actual === null) {
+            html = '<span class="text-[10px] font-semibold text-[#8888A8]">—</span>';
+        } else {
+            html = `<span class="text-[10px] font-bold ${actual > 0 ? 'text-emerald-600' : 'text-slate-500'}">${ghs(actual)}</span>`;
+        }
+        const showBadge = expected !== null && actual !== expected && !(actual === null && expected === 0);
+        if (showBadge) {
+            html += `<span class="ml-1.5 text-[9px] font-bold text-amber-700 bg-amber-50 dark:bg-amber-900/30 px-1.5 py-0.5 rounded-full whitespace-nowrap">${ghs(expected)} expected</span>`;
+        }
+        return html;
+    }
+
+    async function renderUserPage() {
+        const filtered = getFilteredUsers();
+        const total = filtered.length;
+        const pages = Math.ceil(total / PAGE_SIZE);
+        const start = userPage * PAGE_SIZE;
+        const page = filtered.slice(start, start + PAGE_SIZE);
+
+        document.getElementById('users-page-label').textContent = total ? `Page ${userPage + 1} of ${pages} (${total} users)` : 'No users';
+        document.getElementById('users-prev-btn').disabled = userPage === 0;
+        document.getElementById('users-next-btn').disabled = userPage >= pages - 1;
+
+        await computeExpectedBalances(page);
+        const tbody = document.getElementById('users-table-body');
+        tbody.innerHTML = page.map(u => `
+            <tr class="hover:bg-[#F5F6FA] dark:hover:bg-slate-800 transition-colors">
+                <td class="px-5 py-3">
+                    <div class="flex items-center gap-3">
+                        <div class="w-8 h-8 rounded-full bg-[#1845D4] flex items-center justify-center text-white text-[10px] font-bold shrink-0">${(u.fullName || '?')[0].toUpperCase()}</div>
+                        <div class="min-w-0">
+                            <p class="text-xs font-bold truncate">${u.fullName || 'Unknown'}</p>
+                            <p class="text-[10px] text-[#8888A8] truncate">${u.email || ''}</p>
+                        </div>
+                    </div>
+                </td>
+                <td class="px-5 py-3 hidden sm:table-cell">
+                    <span class="text-[10px] px-2 py-0.5 rounded font-bold uppercase ${u.role === 'admin' ? 'bg-red-50 text-red-600' : u.role === 'lecturer' ? 'bg-blue-50 text-blue-600' : 'bg-slate-100 text-slate-600'}">${u.role || 'student'}</span>
+                    ${u.isVerified ? '<span class="ml-1 text-[9px] text-emerald-600 font-bold">Verified</span>' : ''}
+                </td>
+                <td class="px-5 py-3 hidden md:table-cell text-[10px] text-[#8888A8] font-medium">${formatUserDate(u.createdAt)}</td>
+                <td class="px-5 py-3 hidden lg:table-cell">${walletCell(u)}</td>
+                <td class="px-5 py-3">
+                    <div class="relative">
+                        <button onclick="toggleUserMenu(event, '${u.id}')" class="p-1.5 rounded-lg hover:bg-[#F5F6FA] dark:hover:bg-slate-700 transition-colors"><i class="fas fa-ellipsis-v text-[#8888A8] text-xs"></i></button>
+                        <div id="menu-${u.id}" class="hidden absolute right-0 top-full mt-1 w-40 bg-white dark:bg-slate-900 border border-[#DDE0F0] dark:border-slate-700 rounded-lg shadow-xl z-20 py-1">
+                            <button onclick="changeUserRole('${u.id}', 'student')" class="w-full text-left px-4 py-2 text-xs hover:bg-[#F5F6FA] dark:hover:bg-slate-800 transition-colors">Set as Student</button>
+                            <button onclick="changeUserRole('${u.id}', 'lecturer')" class="w-full text-left px-4 py-2 text-xs hover:bg-[#F5F6FA] dark:hover:bg-slate-800 transition-colors">Set as Lecturer</button>
+                            <button onclick="changeUserRole('${u.id}', 'admin')" class="w-full text-left px-4 py-2 text-xs hover:bg-[#F5F6FA] dark:hover:bg-slate-800 transition-colors">Set as Admin</button>
+                            ${u.role === 'student' ? `<button onclick="toggleVerify('${u.id}', ${!u.isVerified})" class="w-full text-left px-4 py-2 text-xs hover:bg-[#F5F6FA] dark:hover:bg-slate-800 transition-colors">${u.isVerified ? 'Unverify' : 'Verify'} Student</button>` : ''}
+                            <button onclick="reconcileWallet('${u.id}')" class="w-full text-left px-4 py-2 text-xs hover:bg-[#F5F6FA] dark:hover:bg-slate-800 transition-colors">Reconcile Wallet</button>
+                            <div class="border-t border-[#DDE0F0] dark:border-slate-700 my-1"></div>
+                            <button onclick="deleteUser('${u.id}')" class="w-full text-left px-4 py-2 text-xs text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors">Delete User</button>
+                        </div>
+                    </div>
+                </td>
+            </tr>
+        `).join('');
+    }
+
+    window.toggleUserMenu = (e, uid) => {
+        e.stopPropagation();
+        document.querySelectorAll('[id^="menu-"]').forEach(m => m.classList.add('hidden'));
+        document.getElementById('menu-' + uid)?.classList.toggle('hidden');
+    };
+    document.addEventListener('click', () => document.querySelectorAll('[id^="menu-"]').forEach(m => m.classList.add('hidden')));
+
+    document.getElementById('user-search')?.addEventListener('input', () => { userPage = 0; renderUserPage(); });
+    document.getElementById('user-role-filter')?.addEventListener('change', () => { userPage = 0; renderUserPage(); });
+    document.getElementById('users-prev-btn')?.addEventListener('click', () => { if (userPage > 0) { userPage--; renderUserPage(); } });
+    document.getElementById('users-next-btn')?.addEventListener('click', () => {
+        const pages = Math.ceil(getFilteredUsers().length / PAGE_SIZE);
+        if (userPage < pages - 1) { userPage++; renderUserPage(); }
+    });
+
+    window.reconcileWallet = async (uid) => {
+        try {
+            const token = await auth.currentUser.getIdToken();
+            const r = await fetch('/api/admin/reconcile-wallet', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
+                body: JSON.stringify({ userId: uid })
+            });
+            const d = await r.json();
+            if (!r.ok) throw new Error(d.error || 'Failed');
+            const idx = allUsers.findIndex(u => u.id === uid);
+            if (idx >= 0) { allUsers[idx].walletBalance = d.newBalance; walletExpected[uid] = d.newBalance; renderUserPage(); }
+            if (d.changed) {
+                showToast(`Wallet reconciled: ${d.previous !== null ? ghs(d.previous) + ' → ' : ''}${ghs(d.newBalance)} (${d.movements} movement${d.movements === 1 ? '' : 's'})`);
+            } else {
+                showToast(`Wallet already correct (${ghs(d.newBalance)})`);
+            }
+        } catch (e) { showToast('Reconcile failed: ' + (e.message || e), 'error'); }
+    };
+
+    window.changeUserRole = async (uid, role) => {
+        try {
+            const response = await adminApi('/api/admin/users', {
+                method: 'PATCH',
+                body: JSON.stringify({ userId: uid, role }),
+            });
+            const data = await response.json().catch(() => ({}));
+            if (!response.ok) throw new Error(data.error || 'Failed');
+            const idx = allUsers.findIndex(u => u.id === uid);
+            if (idx >= 0) allUsers[idx].role = role;
+            renderUserPage();
+            showToast('Role updated.');
+        } catch (e) { showToast('Failed: ' + (e.message || e), 'error'); }
+    };
+
+    window.toggleVerify = async (uid, verify) => {
+        try {
+            const response = await adminApi('/api/admin/users', {
+                method: 'PATCH',
+                body: JSON.stringify({ userId: uid, isVerified: verify }),
+            });
+            const data = await response.json().catch(() => ({}));
+            if (!response.ok) throw new Error(data.error || 'Failed');
+            const idx = allUsers.findIndex(u => u.id === uid);
+            if (idx >= 0) allUsers[idx].isVerified = verify;
+            renderUserPage();
+            showToast(verify ? 'Student verified.' : 'Student unverified.');
+        } catch (e) { showToast('Failed: ' + (e.message || e), 'error'); }
+    };
+
+    window.deleteUser = async (uid) => {
+        if (!confirm('Permanently delete this user? Users with linked records are disabled instead.')) return;
+        try {
+            const response = await adminApi('/api/admin/users', {
+                method: 'DELETE',
+                body: JSON.stringify({ userId: uid }),
+            });
+            const data = await response.json().catch(() => ({}));
+            if (!response.ok) throw new Error(data.error || 'Failed');
+            if (data.disabled) {
+                const idx = allUsers.findIndex(u => u.id === uid);
+                if (idx >= 0) allUsers[idx].status = 'disabled';
+                renderUserPage();
+                showToast(data.message || 'User disabled.');
+            } else {
+                allUsers = allUsers.filter(u => u.id !== uid);
+                renderUserPage();
+                showToast('User deleted.');
+            }
+        } catch (e) { showToast('Failed: ' + (e.message || e), 'error'); }
+    };
+
+    // ===== REVENUE =====
+    async function loadRevenue() {
+        const tbody = document.getElementById('revenue-table-body');
+        tbody.innerHTML = '<tr><td colspan="4" class="text-center py-12 text-sm text-[#8888A8]">Loading...</td></tr>';
+        try {
+            const snap = await getDocs(query(collection(db, 'transactions'), orderBy('createdAt', 'desc'), limit(100)));
+            let total = 0, successTotal = 0, count = snap.size, successCount = 0;
+            const rows = snap.docs.map(d => {
+                const t = d.data();
+                total += t.amount || 0;
+                if (t.status === 'success') { successTotal += t.amount || 0; successCount++; }
+                return `<tr class="hover:bg-[#F5F6FA] dark:hover:bg-slate-800 transition-colors">
+                    <td class="px-5 py-3"><p class="text-xs font-bold">${t.userName || t.email || 'Unknown'}</p><p class="text-[10px] text-[#8888A8]">${t.reference || d.id}</p></td>
+                    <td class="px-5 py-3 text-xs font-bold">GHS ${(t.amount || 0).toFixed(2)}</td>
+                    <td class="px-5 py-3 hidden sm:table-cell"><span class="text-[10px] px-2 py-0.5 rounded font-bold uppercase ${t.status === 'success' ? 'bg-emerald-50 text-emerald-600' : 'bg-amber-50 text-amber-600'}">${t.status || 'pending'}</span></td>
+                    <td class="px-5 py-3 hidden md:table-cell text-[10px] text-[#8888A8] font-medium">${t.createdAt?.toDate?.().toLocaleDateString?.() || '---'}</td>
+                </tr>`;
+            }).join('');
+            tbody.innerHTML = rows;
+
+            document.getElementById('revenue-stats').innerHTML = `
+                <div class="p-4 bg-white dark:bg-slate-900 border border-[#DDE0F0] dark:border-slate-800 rounded-xl"><p class="text-[10px] font-black text-[#8888A8] uppercase tracking-widest">Total Transactions</p><p class="text-xl font-bold mt-1">${count}</p></div>
+                <div class="p-4 bg-white dark:bg-slate-900 border border-[#DDE0F0] dark:border-slate-800 rounded-xl"><p class="text-[10px] font-black text-[#8888A8] uppercase tracking-widest">Total Revenue</p><p class="text-xl font-bold mt-1">GHS ${total.toLocaleString()}</p></div>
+                <div class="p-4 bg-white dark:bg-slate-900 border border-[#DDE0F0] dark:border-slate-800 rounded-xl"><p class="text-[10px] font-black text-[#8888A8] uppercase tracking-widest">Successful</p><p class="text-xl font-bold mt-1">${successCount} (GHS ${successTotal.toFixed(2)})</p></div>
+            `;
+        } catch (e) { console.error(e); }
+    }
+
+    // ===== SETTINGS =====
+    async function loadSettings() {
+        try {
+            const snap = await getDoc(doc(db, 'system_settings', 'subscription'));
+            if (snap.exists()) {
+                const d = snap.data();
+                document.getElementById('setting-pay-to-use').checked = !!d.isPayToUse;
+                document.getElementById('setting-semester-fee').value = (d.perClassFee || 600) / 100;
+            }
+        } catch (e) { console.error(e); }
+    }
+
+    document.getElementById('save-settings-btn')?.addEventListener('click', async () => {
+        const btn = document.getElementById('save-settings-btn');
+        btn.disabled = true; btn.textContent = 'Saving...';
+        try {
+            const isPayToUse = document.getElementById('setting-pay-to-use').checked;
+            const perClassFee = (parseInt(document.getElementById('setting-semester-fee').value) || 6) * 100;
+            await setDoc(doc(db, 'system_settings', 'subscription'), { isPayToUse, perClassFee, currency: 'GHS', updatedAt: serverTimestamp() });
+            showToast('Settings saved.');
+        } catch (e) { showToast('Failed.', 'error'); }
+        btn.disabled = false; btn.textContent = 'Save Settings';
+    });
+
+    function showToast(msg, type = 'success') {
+        const existing = document.querySelector('.toast');
+        if (existing) existing.remove();
+        const el = document.createElement('div');
+        el.className = `toast fixed bottom-6 left-1/2 -translate-x-1/2 px-5 py-3 rounded-xl text-xs font-bold shadow-lg z-[999] ${type === 'error' ? 'bg-red-500 text-white' : 'bg-[#0D0D1A] text-white'}`;
+        el.textContent = msg;
+        document.body.appendChild(el);
+        setTimeout(() => el.remove(), 2500);
+    }
+
+    let currentModalSessionId = null;
+
+    window.openSessionModal = async function(sessionId) {
+        currentModalSessionId = sessionId;
+        const modal = document.getElementById('session-detail-modal');
+        modal.classList.remove('hidden');
+
+        document.getElementById('modal-session-title').textContent = 'Loading...';
+        document.getElementById('modal-quick-stats').innerHTML = '';
+        document.getElementById('modal-refund-section').innerHTML = '';
+        document.getElementById('modal-participants-list').innerHTML = '<div class="text-sm text-[#8888A8] text-center py-4">Loading...</div>';
+        document.getElementById('modal-end-btn').classList.add('hidden');
+        const refundBtn = document.getElementById('modal-refund-btn');
+        refundBtn.classList.add('hidden');
+
+        try {
+            const token = await auth.currentUser.getIdToken();
+            const res = await fetch('/api/admin/session-audit?sessionId=' + encodeURIComponent(sessionId), {
+                headers: { 'Authorization': 'Bearer ' + token }
+            });
+            const audit = await res.json();
+            if (!res.ok) throw new Error(audit.error || 'Failed to load audit');
+
+            const s = audit.session;
+            document.getElementById('modal-session-title').textContent = s.title || 'Untitled Session';
+
+            const durBadge = s.durationMinutes !== null && s.durationMinutes !== undefined
+                ? `<span class="px-1.5 py-0.5 rounded font-bold ${s.metThreshold ? 'bg-emerald-50 text-emerald-600 dark:bg-emerald-900/30' : 'bg-amber-50 text-amber-700 dark:bg-amber-900/30'}">${s.durationMinutes} min ${s.metThreshold ? '· met 30m' : '· under 30m'}</span>`
+                : '';
+            const refundStateBadge = s.refundProcessed
+                ? '<span class="px-1.5 py-0.5 rounded font-bold bg-slate-100 text-slate-600 dark:bg-slate-800">refund processed</span>'
+                : '';
+
+            document.getElementById('modal-quick-stats').innerHTML = `
+                <div class="p-3 bg-[#F5F6FA] dark:bg-slate-800 rounded-xl">
+                    <p class="text-[9px] font-black text-[#8888A8] uppercase tracking-widest">Created by</p>
+                    <p class="text-xs font-bold mt-1 truncate" title="${escHtml(audit.creator.email || '')}">${escHtml(audit.creator.name)}</p>
+                    <p class="text-[9px] text-[#8888A8] truncate">${escHtml(audit.creator.email || '')}</p>
+                </div>
+                <div class="p-3 bg-[#F5F6FA] dark:bg-slate-800 rounded-xl">
+                    <p class="text-[9px] font-black text-[#8888A8] uppercase tracking-widest">Started</p>
+                    <p class="text-xs font-bold mt-1">${s.startedAt ? new Date(s.startedAt).toLocaleString() : 'Never started'}</p>
+                </div>
+                <div class="p-3 bg-[#F5F6FA] dark:bg-slate-800 rounded-xl">
+                    <p class="text-[9px] font-black text-[#8888A8] uppercase tracking-widest">Duration</p>
+                    <p class="text-xs font-bold mt-1">${durBadge || '—'}</p>
+                </div>
+                <div class="p-3 bg-[#F5F6FA] dark:bg-slate-800 rounded-xl">
+                    <p class="text-[9px] font-black text-[#8888A8] uppercase tracking-widest">Status</p>
+                    <p class="text-xs font-bold mt-1"><span class="w-1.5 h-1.5 rounded-full inline-block mr-1.5 ${s.isActive ? 'bg-emerald-500 animate-pulse' : 'bg-slate-300'}"></span>${s.isActive ? 'Live' : s.status || 'Ended'} ${refundStateBadge}</p>
+                </div>
+            `;
+
+            // --- Refund analysis ---
+            const refundSection = document.getElementById('modal-refund-section');
+            const refundRows = audit.refunds.rows;
+            if (refundRows.length === 0) {
+                refundSection.innerHTML = '<div class="text-[11px] text-[#8888A8]">No paid enrollments for this class — nothing to refund.</div>';
+            } else {
+                const fmt = (p) => (p ? new Date(p).toLocaleTimeString() : '—');
+                refundSection.innerHTML = `
+                    <div class="flex items-center justify-between mb-2">
+                        <h4 class="text-[10px] font-black text-[#8888A8] uppercase tracking-widest">Payments & refunds</h4>
+                        <div class="text-[10px] font-bold text-[#8888A8]">
+                            ${audit.refunds.refundableTotal > 0 ? `<span class="text-amber-700">GHS ${(audit.refunds.refundableTotal / 100).toFixed(2)} refundable</span> · ` : ''}
+                            ${audit.refunds.refundedTotal > 0 ? `<span class="text-emerald-600">GHS ${(audit.refunds.refundedTotal / 100).toFixed(2)} refunded</span>` : ''}
+                        </div>
+                    </div>
+                    <div class="space-y-2">
+                        ${refundRows.map((r) => `
+                            <div class="flex items-center justify-between p-3 bg-[#F5F6FA] dark:bg-slate-800 rounded-lg">
+                                <div class="min-w-0">
+                                    <p class="text-xs font-bold truncate">${escHtml(r.name)}</p>
+                                    <p class="text-[9px] text-[#8888A8]">Paid GHS ${(r.amount / 100).toFixed(2)} · stayed ${r.stayMinutes !== null ? r.stayMinutes + ' min' : 'unknown'} · joined ${fmt(r.paidAt)}</p>
+                                </div>
+                                <div class="shrink-0">
+                                    ${r.alreadyRefunded
+                                        ? '<span class="text-[9px] font-bold text-slate-500 uppercase">Refunded</span>'
+                                        : r.refundEligible
+                                            ? '<span class="text-[9px] font-bold text-amber-700 uppercase">Refund eligible</span>'
+                                            : '<span class="text-[9px] font-bold text-emerald-600 uppercase">No refund</span>'}
+                                </div>
+                            </div>
+                        `).join('')}
+                    </div>
+                `;
+            }
+
+            // Manual refund: show whenever the server says there is something to do.
+            if (audit.refunds.canTrigger) {
+                refundBtn.classList.remove('hidden');
+                refundBtn.onclick = () => triggerRefund(sessionId, s.title);
+            }
+
+            if (s.isActive) {
+                document.getElementById('modal-end-btn').classList.remove('hidden');
+                document.getElementById('modal-end-btn').onclick = async () => {
+                    if (confirm('End this session?')) {
+                        await updateDoc(doc(db, 'sessions', sessionId), { isActive: false, status: 'ended' });
+                        closeSessionModal();
+                        loadSessions();
+                        showToast('Session ended.');
+                    }
+                };
+            }
+
+            const plist = document.getElementById('modal-participants-list');
+            const participants = audit.participants;
+            if (participants.length === 0) {
+                plist.innerHTML = '<div class="text-sm text-[#8888A8] text-center py-4">No participants yet.</div>';
+            } else {
+                plist.innerHTML = participants.map((p) => `
+                    <div class="flex items-center justify-between p-3 bg-[#F5F6FA] dark:bg-slate-800 rounded-lg">
+                        <div class="flex items-center gap-3 min-w-0">
+                            <div class="w-8 h-8 rounded-full bg-[#1845D4] flex items-center justify-center text-white text-[10px] font-bold shrink-0">${escHtml((p.name || '?')[0].toUpperCase())}</div>
+                            <div class="min-w-0">
+                                <p class="text-xs font-bold truncate">${escHtml(p.name || 'Unknown')}</p>
+                                <p class="text-[9px] text-[#8888A8]">${escHtml(p.email || '')}</p>
+                            </div>
+                        </div>
+                        <div class="flex items-center gap-3 text-[10px] text-[#8888A8] font-medium">
+                            <span>Joined ${p.joinedAt ? new Date(p.joinedAt).toLocaleTimeString() : '—'}</span>
+                            ${p.stayMinutes !== null ? `<span class="${p.stayMinutes < REFUND_THRESHOLD_MINUTES ? 'text-amber-700 font-bold' : 'text-emerald-600 font-bold'}">${p.stayMinutes} min</span>` : ''}
+                            ${p.verificationPercentage > 0 ? `<span class="text-emerald-600 font-bold">${p.verificationPercentage}% verified</span>` : ''}
+                        </div>
+                    </div>
+                `).join('');
+            }
+        } catch (e) {
+            console.error(e);
+            document.getElementById('modal-session-title').textContent = 'Error loading session';
+            showToast(e.message || 'Failed to load session audit.', 'error');
+        }
+    };
+
+    window.triggerRefund = async function(sessionId, title) {
+        if (!confirm(`Manually refund eligible students for "${title || 'this class'}"?\n\nOnly students who stayed under 30 minutes and were not yet refunded will get their money back to their wallet.`)) return;
+        const btn = document.getElementById('modal-refund-btn');
+        btn.disabled = true;
+        btn.textContent = 'Refunding...';
+        try {
+            const token = await auth.currentUser.getIdToken();
+            const res = await fetch('/api/wallet/refund', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
+                body: JSON.stringify({ sessionId })
+            });
+            const d = await res.json();
+            if (!res.ok) throw new Error(d.error || 'Refund failed');
+            showToast(d.refunded > 0 ? `Refunded ${d.refunded} student${d.refunded === 1 ? '' : 's'} back to their wallets.` : 'No eligible students to refund.');
+            openSessionModal(sessionId); // reload the audit so badges flip to "Refunded"
+        } catch (e) {
+            showToast(e.message || 'Refund failed.', 'error');
+        } finally {
+            btn.disabled = false;
+            btn.textContent = 'Trigger Refund';
+        }
+    };
+
+    window.closeSessionModal = function() {
+        document.getElementById('session-detail-modal').classList.add('hidden');
+        currentModalSessionId = null;
+    };
+</script>
+</body>
+</html>

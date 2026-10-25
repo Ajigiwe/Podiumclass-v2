@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>About Podium - Modern Virtual Education</title>
+    <link rel="manifest" href="./manifest.json">
+    <link rel="apple-touch-icon" href="./icon-192x192.png">
+    <link rel="icon" type="image/png" href="./icon-192x192.png">
+    <meta name="theme-color" content="#1845D4">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@100..900&family=Outfit:wght@100..900&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/css/podium.css?v=2">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <script src="./js/theme-init.js"></script>
+    <link rel="stylesheet" href="./css/index.css">
+    
+</head>
+<body class="bg-[#F5F6FA] text-[#0D0D1A] dark:bg-slate-950 dark:text-slate-100 font-sans selection:bg-blue-100 transition-colors duration-200">
+    
+    <!-- Navigation -->
+    <nav id="navbar" class="fixed top-0 left-0 right-0 z-50 bg-white/80 dark:bg-slate-950/80 backdrop-blur-md border-b border-[#DDE0F0] dark:border-slate-800 py-4 transition-all">
+        <div class="max-w-6xl mx-auto px-6 flex justify-between items-center">
+            <a href="/" class="flex items-center gap-2">
+                <div class="w-8 h-8 bg-[#1845D4] rounded-lg flex items-center justify-center">
+                    <i class="fas fa-graduation-cap text-white text-sm"></i>
+                </div>
+                <span class="text-lg font-sans font-black text-[#0D0D1A] dark:text-white tracking-tighter">Podium</span>
+            </a>
+
+            <div class="hidden md:flex items-center gap-6">
+                <button id="theme-toggle" class="p-2 rounded-lg hover:bg-[#F5F6FA] dark:hover:bg-slate-900 transition-colors">
+                    <i id="theme-icon" class="fas fa-moon text-[#8888A8]"></i>
+                </button>
+                <div class="w-px h-4 bg-[#DDE0F0] dark:bg-slate-800"></div>
+                <a href="/" class="text-[9px] font-bold text-[#8888A8] hover:text-[#1845D4] uppercase tracking-widest transition-colors">Home</a>
+                <a href="./auth/login.html" class="text-[9px] font-bold text-[#8888A8] hover:text-[#1845D4] uppercase tracking-widest transition-colors">Sign In</a>
+                <a href="./auth/signup.html" class="px-4 py-2 bg-[#1845D4] text-white text-[9px] font-bold uppercase tracking-widest rounded-md hover:bg-[#0F2FA8] transition-all active:scale-95 shadow-lg shadow-blue-600/10">Get Started</a>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Hero -->
+    <section class="pt-40 pb-24 px-6 sm:px-8">
+        <div class="max-w-4xl mx-auto text-center">
+            <h1 class="text-4xl sm:text-7xl font-sans font-black text-[#0D0D1A] mb-8 tracking-tighter leading-tight animate-fade-in">
+                Designed for the <span class="text-[#1845D4] italic">Modern Classroom.</span>
+            </h1>
+            <p class="text-lg text-[#444460] font-medium max-w-2xl mx-auto leading-relaxed opacity-80 animate-fade-in" style="animation-delay: 0.1s">
+                Podium is built from the ground up to solve the unique challenges of large-scale virtual education. We focus on reliability, engagement, and automated management.
+            </p>
+        </div>
+    </section>
+
+    <!-- Features -->
+    <section id="features" class="py-24 bg-white dark:bg-slate-950 border-y border-[#DDE0F0] dark:border-slate-900">
+        <div class="max-w-6xl mx-auto px-6">
+            <div class="max-w-xl mb-16 space-y-3">
+                <h2 class="text-3xl font-sans text-[#0D0D1A] dark:text-white tracking-tight">Built for Real <span class="text-[#1845D4]">Academic Work.</span></h2>
+                <p class="text-sm text-[#444460] dark:text-slate-400 font-medium leading-relaxed">No fluff. Just the essential tools required to host professional classes and maintain accurate records.</p>
+            </div>
+            
+            <div class="grid md:grid-cols-3 gap-10">
+                <div class="space-y-4 group">
+                    <div class="w-12 h-12 bg-blue-50 dark:bg-blue-900/20 text-[#1845D4] dark:text-blue-400 rounded-xl flex items-center justify-center group-hover:bg-[#1845D4] group-hover:text-white transition-all duration-300"><i class="fas fa-video text-xl"></i></div>
+                    <h3 class="text-lg font-sans font-black text-[#0D0D1A] dark:text-white">Live Classroom</h3>
+                    <p class="text-[#444460] dark:text-slate-400 font-medium leading-relaxed text-xs">Professional video conferencing with participant management and session control.</p>
+                </div>
+                <div class="space-y-4 group">
+                    <div class="w-12 h-12 bg-blue-50 dark:bg-blue-900/20 text-[#1845D4] dark:text-blue-400 rounded-xl flex items-center justify-center group-hover:bg-[#1845D4] group-hover:text-white transition-all duration-300"><i class="fas fa-history text-xl"></i></div>
+                    <h3 class="text-lg font-sans font-black text-[#0D0D1A] dark:text-white">Attendance Registry</h3>
+                    <p class="text-[#444460] dark:text-slate-400 font-medium leading-relaxed text-xs">Automated tracking of join times and durations for every participant, archived automatically.</p>
+                </div>
+                <div class="space-y-4 group">
+                    <div class="w-12 h-12 bg-blue-50 dark:bg-blue-900/20 text-[#1845D4] dark:text-blue-400 rounded-xl flex items-center justify-center group-hover:bg-[#1845D4] group-hover:text-white transition-all duration-300"><i class="fas fa-hdd text-xl"></i></div>
+                    <h3 class="text-lg font-sans font-black text-[#0D0D1A] dark:text-white">Media Archives</h3>
+                    <p class="text-[#444460] dark:text-slate-400 font-medium leading-relaxed text-xs">Centralized dashboard for all past session recordings, ensuring learning never stops.</p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- CTA -->
+    <section class="py-32 px-6 sm:px-8">
+        <div class="max-w-3xl mx-auto text-center space-y-10">
+            <h2 class="text-4xl font-sans font-black text-[#0D0D1A] tracking-tighter">Ready to experience <span class="italic">Podium?</span></h2>
+            <div class="flex flex-col sm:flex-row items-center justify-center gap-4">
+                <a href="./auth/login.html" class="w-full sm:w-auto px-12 py-5 rounded-xl bg-[#1845D4] text-white text-[11px] font-black uppercase tracking-[0.2em] shadow-xl shadow-blue-600/20 hover:bg-[#0F2FA8] transition-all active:scale-95">Get Started for Free</a>
+                <a href="/" class="w-full sm:w-auto px-12 py-5 rounded-xl bg-white text-[#0D0D1A] text-[11px] font-black uppercase tracking-[0.2em] border border-[#DDE0F0] hover:border-[#1845D4] transition-all">Back Home</a>
+            </div>
+        </div>
+    </section>
+
+    <!-- Footer -->
+    <footer class="py-10 border-t border-[#DDE0F0]">
+        <div class="max-w-6xl mx-auto px-6 text-center">
+            <p class="text-[9px] font-black text-[#8888A8] uppercase tracking-[0.4em]">
+                PODIUM CLASSROOM &copy; 2026
+            </p>
+        </div>
+    </footer>
+
+    <script>
+        window.onscroll = function() {
+            const navbar = document.getElementById('navbar');
+            if (window.pageYOffset > 20) {
+                navbar.classList.add('bg-white', 'border-b', 'border-[#DDE0F0]', 'h-16');
+                navbar.classList.remove('h-20');
+            } else {
+                navbar.classList.remove('bg-white', 'border-b', 'border-[#DDE0F0]', 'h-16');
+                navbar.classList.add('h-20');
+            }
+        };
+    </script>
+    <script src="./js/theme-toggle.js"></script>
+</body>
+</html>

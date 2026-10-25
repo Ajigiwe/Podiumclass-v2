@@ -1,0 +1,76 @@
+# Docker Compose for the Podium LMS stack.
+#
+# Secrets are REQUIRED from the environment -- there are no inline defaults.
+# A password committed to this file is public the moment the repository is, and
+# `${VAR:?}` makes compose fail fast with a clear message instead of silently
+# starting with a shared, guessable credential.
+#
+# Create a .env file next to this one (see .env.example) before running:
+#   docker compose up -d
+
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: podium_postgres
+    restart: always
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-podium}
+      POSTGRES_USER: ${POSTGRES_USER:-podium}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: podium_backend
+    restart: always
+    # gunicorn, not runserver: the dev server is single-threaded, unsuitable for
+    # serving real traffic, and refuses to serve static files with DEBUG off.
+    command: >
+      sh -c "python manage.py migrate &&
+             python manage.py collectstatic --noinput &&
+             gunicorn config.wsgi:application --bind 0.0.0.0:8000 --workers 3"
+    environment:
+      # Default to production posture. An unset DJANGO_DEBUG must never ship
+      # DEBUG mode -- that would expose stack traces and the full URLconf.
+      - DJANGO_DEBUG=${DJANGO_DEBUG:-False}
+      - USE_POSTGRES=true
+      # Percent-encode special characters if the password contains @ : / or ?.
+      - DATABASE_URL=postgresql://${POSTGRES_USER:-podium}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}@db:5432/${POSTGRES_DB:-podium}
+      - DJANGO_SECRET_KEY=${DJANGO_SECRET_KEY:?DJANGO_SECRET_KEY must be set}
+      - ALLOWED_HOSTS=${ALLOWED_HOSTS:?ALLOWED_HOSTS must be set}
+      - CORS_ALLOWED_ORIGINS=${CORS_ALLOWED_ORIGINS:-}
+      - LIVEKIT_API_KEY=${LIVEKIT_API_KEY:-}
+      - LIVEKIT_API_SECRET=${LIVEKIT_API_SECRET:-}
+      - LIVEKIT_URL=${LIVEKIT_URL:-wss://livekit.podiumclass.online}
+      - ATTENDANCE_API_KEY=${ATTENDANCE_API_KEY:-}
+    ports:
+      - "8000:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: podium_frontend
+    restart: always
+    ports:
+      - "5173:5173"
+    environment:
+      - VITE_API_URL=${VITE_API_URL:-http://localhost:8000}
+    depends_on:
+      - backend
+
+volumes:
+  pgdata:

@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Podium Recorder</title>
+<style>
+    html, body { margin: 0; padding: 0; width: 100%; height: 100%; background: #000; overflow: hidden; }
+    #grid {
+        display: grid; width: 100%; height: 100%; gap: 4px; box-sizing: border-box;
+        grid-template-columns: repeat(2, 1fr); grid-auto-rows: 1fr;
+    }
+    #grid[data-n="1"], #grid[data-n="2"] { grid-template-columns: 1fr; }
+    #grid[data-n="3"], #grid[data-n="4"] { grid-template-columns: repeat(2, 1fr); }
+    #grid[data-n="5"], #grid[data-n="6"] { grid-template-columns: repeat(3, 1fr); }
+    .tile { position: relative; background: #111; overflow: hidden; min-width: 0; min-height: 0; }
+    .tile video { width: 100%; height: 100%; object-fit: cover; }
+    .tile.screenshare video { object-fit: contain; }
+    .name {
+        position: absolute; left: 8px; bottom: 8px; z-index: 2;
+        background: rgba(0,0,0,.6); color: #fff; font: 600 12px/1 -apple-system, 'Segoe UI', Roboto, sans-serif;
+        padding: 4px 8px; border-radius: 6px; max-width: 70%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+    .mic-off {
+        position: absolute; right: 8px; top: 8px; z-index: 2;
+        background: rgba(220,38,38,.9); color: #fff; font: 700 10px/1 sans-serif;
+        padding: 4px 6px; border-radius: 6px;
+    }
+    #status {
+        position: fixed; inset: 0; display: flex; align-items: center; justify-content: center;
+        color: #94a3b8; font: 500 14px sans-serif; z-index: 10;
+    }
+</style>
+</head>
+<body>
+<div id="status">Connecting to class…</div>
+<div id="grid" style="display:none"></div>
+
+<script src="/js/vendor/livekit-client.umd.js?v=1"></script>
+<script>
+(function () {
+    'use strict';
+
+    // Room-composite egress appends ?url=&token=&layout= to this page. We connect as the
+    // hidden recorder participant, composite every camera/screen-share track, and signal
+    // the recorder process via console markers (START_RECORDING / END_RECORDING).
+    var params = new URLSearchParams(window.location.search);
+    var wsUrl = params.get('url');
+    var token = params.get('token');
+    var layout = (params.get('layout') || 'grid').toLowerCase();
+
+    var statusEl = document.getElementById('status');
+    var gridEl = document.getElementById('grid');
+
+    if (!wsUrl || !token || typeof LivekitClient === 'undefined') {
+        statusEl.textContent = 'Recorder configuration error';
+        console.error('[podium-recorder] missing url/token or LivekitClient failed to load');
+        return;
+    }
+
+    var room = new LivekitClient.Room({
+        adaptiveStreaming: true,
+        dynacast: true,
+        videoCaptureDefaults: { resolution: LivekitClient.VideoPresets.h720.resolution },
+    });
+
+    var tiles = new Map(); // trackSid -> tile element
+
+    function ensureTile(track, participant) {
+        var key = track.sid || participant.identity + ':' + track.source;
+        var tile = tiles.get(key);
+        if (tile) return tile;
+        tile = document.createElement('div');
+        tile.className = 'tile' + (track.source === LivekitClient.Track.Source.ScreenShare ? ' screenshare' : '');
+        var video = document.createElement('video');
+        video.autoplay = true; video.playsInline = true; video.muted = true;
+        track.attach(video);
+        tile.appendChild(video);
+        var name = document.createElement('div');
+        name.className = 'name';
+        name.textContent = participant.name || participant.identity || '';
+        tile.appendChild(name);
+        var micOff = document.createElement('div');
+        micOff.className = 'mic-off';
+        micOff.textContent = 'MIC OFF';
+        micOff.style.display = participant.isMicrophoneEnabled ? 'none' : 'block';
+        tile.appendChild(micOff);
+        participant.on('participantChanged', function () {
+            micOff.style.display = participant.isMicrophoneEnabled ? 'none' : 'block';
+        });
+        tiles.set(key, tile);
+        render();
+        return tile;
+    }
+
+    function removeTile(track) {
+        var key = track.sid;
+        if (!key) return;
+        var tile = tiles.get(key);
+        if (tile) { tile.remove(); tiles.delete(key); render(); }
+    }
+
+    function render() {
+        var list = Array.from(tiles.values());
+        // Screen shares take priority and render large (single) when the layout asks for it
+        var screens = list.filter(function (t) { return t.className.indexOf('screenshare') !== -1; });
+        var cams = list.filter(function (t) { return t.className.indexOf('screenshare') === -1; });
+        var ordered = layout === 'speaker' && screens.length ? screens.concat(cams) : cams.concat(screens);
+        gridEl.innerHTML = '';
+        ordered.forEach(function (t) { gridEl.appendChild(t); });
+        var n = Math.max(1, ordered.length);
+        gridEl.dataset.n = String(n);
+        gridEl.style.display = n ? 'grid' : 'none';
+        statusEl.style.display = n ? 'none' : 'flex';
+        statusEl.textContent = 'Waiting for participants…';
+    }
+
+    function started() {
+        statusEl.style.display = 'none';
+        gridEl.style.display = 'grid';
+        console.log('START_RECORDING');
+    }
+
+    room
+        .on(LivekitClient.RoomEvent.TrackSubscribed, function (track, pub, participant) {
+            if (track.kind === 'video') ensureTile(track, participant);
+        })
+        .on(LivekitClient.RoomEvent.TrackUnsubscribed, function (track) {
+            if (track.kind === 'video') removeTile(track);
+        })
+        .on(LivekitClient.RoomEvent.ParticipantConnected, render)
+        .on(LivekitClient.RoomEvent.ParticipantDisconnected, render)
+        .on(LivekitClient.RoomEvent.Disconnected, function () {
+            console.log('END_RECORDING');
+        });
+
+    room.connect(wsUrl, token)
+        .then(function () {
+            render();
+            // Wait two composited frames so the first video frames are actually visible
+            // before telling the recorder to roll — avoids a black first second.
+            requestAnimationFrame(function () {
+                requestAnimationFrame(started);
+            });
+        })
+        .catch(function (err) {
+            statusEl.textContent = 'Recorder failed to connect';
+            console.error('[podium-recorder] connect failed:', err);
+        });
+})();
+</script>
+</body>
+</html>

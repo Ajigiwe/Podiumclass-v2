@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Wallet - Podium</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@100..900&family=Outfit:wght@100..900&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/css/podium.css?v=2">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <style>body{font-family:'Inter',sans-serif}</style>
+</head>
+<body class="bg-[#F5F6FA] text-[#0D0D1A] min-h-screen">
+<div class="min-h-screen flex">
+<aside class="hidden lg:flex w-60 flex-col fixed inset-y-0 bg-white border-r border-[#DDE0F0] z-50">
+<a href="/" class="h-[60px] px-6 flex items-center border-b border-[#DDE0F0] font-serif text-[1.3rem] text-[#1845D4] font-black">Podium</a>
+<nav class="flex-1 px-3 py-6"><a href="./dashboard.html" class="flex items-center gap-2.5 px-3 py-2.5 rounded-md text-[13px] font-medium text-[#444460] hover:bg-[#F5F6FA]"><i class="fas fa-layer-group w-4 h-4"></i> Dashboard</a>
+<a href="./wallet.html" class="flex items-center gap-2.5 px-3 py-2.5 rounded-md text-[13px] font-medium bg-[#E8EEFF] text-[#1845D4]"><i class="fas fa-wallet w-4 h-4"></i> Wallet</a>
+<a href="./history.html" class="flex items-center gap-2.5 px-3 py-2.5 rounded-md text-[13px] font-medium text-[#444460] hover:bg-[#F5F6FA]"><i class="fas fa-history w-4 h-4"></i> History</a></nav>
+</aside>
+<main class="flex-1 lg:pl-60 p-8 max-w-4xl mx-auto w-full space-y-6">
+<div class="bg-white border border-[#DDE0F0] rounded-xl p-6 flex items-center justify-between">
+<div class="flex items-center gap-3"><div class="w-10 h-10 bg-[#E8EEFF] rounded-lg flex items-center justify-center text-[#1845D4]"><i class="fas fa-wallet"></i></div><div><div class="text-[10px] font-black text-[#8888A8] uppercase tracking-widest">Wallet Balance</div><div id="wallet-balance" class="text-2xl font-black">GHS 0.00</div></div></div>
+<button id="topup-open" class="px-4 py-2 bg-[#1845D4] text-white text-[11px] font-bold uppercase tracking-widest rounded-lg">Top Up</button>
+</div>
+<div class="bg-white border border-[#DDE0F0] rounded-xl overflow-hidden">
+<div class="px-6 py-4 border-b border-[#DDE0F0] font-bold text-[13px]">Transaction History (Credits & Debits)</div>
+<div id="wallet-list" class="divide-y divide-[#DDE0F0]"><div class="py-12 text-center text-[#8888A8] text-[11px] font-bold uppercase tracking-widest">Loading...</div></div>
+</div>
+</main>
+</div>
+<div id="modal-topup" class="hidden fixed inset-0 z-[100] flex items-center justify-center p-6"><div class="absolute inset-0 bg-[#0D0D1A]/40" onclick="this.parentElement.classList.add('hidden')"></div><div class="bg-white w-full max-w-sm rounded-2xl p-8 relative"><h3 class="font-bold">Top Up Wallet</h3><p class="text-[11px] text-[#8888A8]">GHS only, min GHS 1</p><form id="topup-form" class="mt-4 space-y-3"><input id="topup-amount" type="number" step="0.01" required placeholder="5.00" class="w-full px-4 py-3 border-2 border-[#DDE0F0] rounded-xl text-sm outline-none"><button type="submit" class="w-full py-3 bg-[#1845D4] text-white rounded-xl text-[11px] font-bold uppercase tracking-widest">Pay with Paystack</button></form></div></div>
+<script src="https://js.paystack.co/v2/inline.js"></script>
+<script type="module">
+import { auth, db } from './js/firebase-config.js?v=19';
+import { onAuthStateChanged } from './js/auth-client.js?v=1';
+import { doc, getDoc, onSnapshot } from "./js/pg-firestore.js?v=1";
+onAuthStateChanged(auth, async user=>{
+ if(!user){ window.location.href='./auth/login.html'; return;}
+ // Auto-reconcile wallet on page load (permanent fix for stuck credits)
+ try{
+   const tok=await user.getIdToken();
+   const rec=await fetch('/api/wallet/reconcile',{method:'POST',headers:{Authorization:`Bearer ${tok}`}});
+   if(rec.ok){ const rj=await rec.json(); if(rj.newBalance!==undefined) console.log('reconciled',rj); }
+ }catch(e){ console.error('reconcile failed',e); }
+ onSnapshot(doc(db,'profiles',user.uid),(snap)=>{
+   if(snap.exists()){ document.getElementById('wallet-balance').innerText='GHS '+(snap.data().walletBalance/100).toFixed(2); }
+ });
+ load();
+  async function load(){
+   const token=await user.getIdToken();
+   const r=await fetch('/api/wallet/history',{headers:{Authorization:`Bearer ${token}`}});
+   let d=null; try{ d=await r.json(); }catch(e){ console.error('history json failed',e); }
+    const list=document.getElementById('wallet-list');
+    if(!r.ok){ console.error('history fetch failed',r.status,d); list.innerHTML='<div class="py-12 text-center text-[11px] text-red-500 uppercase tracking-widest">Failed to load: '+(d?.error||r.status)+'</div>'; return; }
+    if(!d||!d.success||!d.data||d.data.length===0){ list.innerHTML='<div class="py-12 text-center text-[11px] text-[#8888A8] uppercase tracking-widest">No transactions</div>'; return;}
+    try{
+    list.innerHTML=d.data.map(t=>{
+    const isCredit=t.type==='top_up'||t.type==='refund';
+    const amt = typeof t.amount==='number'?t.amount:0;
+    const ref = (t.paystackReference||t.reference||'')+'';
+    const sess = (t.sessionId||'')+'';
+    const ch = (t.paymentChannel||'')+'';
+    return `<div class="px-6 py-4 flex items-center justify-between"><div><div class="text-[13px] font-bold">${t.type==='top_up'?'Top-up':t.type==='refund'?'Refund':t.type==='session_payment'?'Class payment':'Transaction'} <span class="text-[10px] text-[#8888A8]">${sess && sess!=='wallet_topup'?sess.slice(0,8):''}</span></div><div class="text-[11px] text-[#8888A8]">${ref.slice(0,12)} · ${ch}</div></div><div class="text-[13px] font-black ${isCredit?'text-emerald-600':''}">${isCredit?'+':'-'}GHS ${(amt/100).toFixed(2)}</div></div>`;
+   }).join('');
+   }catch(e){ console.error('history render failed',e); list.innerHTML='<div class="py-12 text-center text-[11px] text-red-500">Render error: '+e.message+'</div>'; }
+ }
+ document.getElementById('topup-open').onclick=()=> document.getElementById('modal-topup').classList.remove('hidden');
+  document.getElementById('topup-form').addEventListener('submit', async e=>{
+   e.preventDefault();
+   const ghs=parseFloat(document.getElementById('topup-amount').value);
+   if(!ghs || ghs<1) return alert('Minimum top-up is GHS 1');
+   const amt=Math.round(ghs*100);
+   const btn=e.target.querySelector('button[type=submit]');
+   btn.disabled=true; btn.textContent='Initializing...';
+   try{
+    const token=await auth.currentUser.getIdToken();
+    const r=await fetch('/api/wallet/topup/initialize',{method:'POST',headers:{Authorization:`Bearer ${token}`,'Content-Type':'application/json'},body:JSON.stringify({amount:amt})});
+    const d=await r.json();
+    if(!r.ok) throw new Error(d.error||'Failed');
+    const handler=PaystackPop.setup({
+      key:'pk_live_dfaef9f68d88d002fdc2e89eb8156370c5fba1dd',
+      email:user.email||'student@podiumclass.online',
+      amount:amt,
+      currency:'GHS',
+      ref:d.reference,
+      channels:['card','mobile_money'],
+      onClose:()=>{ btn.disabled=false; btn.textContent='Pay with Paystack'; },
+      callback:async(response)=>{
+        try{
+          const vr=await fetch('/api/paystack/verify',{method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+token},body:JSON.stringify({reference:response.reference})});
+        }catch(e){}
+        document.getElementById('modal-topup').classList.add('hidden');
+        btn.disabled=false; btn.textContent='Pay with Paystack';
+      }
+    });
+    handler.openIframe();
+   }catch(err){ alert(err.message||'Network error'); btn.disabled=false; btn.textContent='Pay with Paystack'; }
+  });
+});
+</script>
+</body>
+</html>

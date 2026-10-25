@@ -1,0 +1,939 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dashboard - Podium</title>
+    <link rel="manifest" href="./manifest.json">
+    <link rel="apple-touch-icon" href="./icon-192x192.png">
+    <link rel="icon" type="image/png" href="./icon-192x192.png">
+    <meta name="theme-color" content="#1845D4">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@100..900&family=Outfit:wght@100..900&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/css/podium.css?v=2">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <link rel="stylesheet" href="./css/index.css">
+    <script src="./js/theme-init.js"></script>
+    
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        .font-serif { font-family: 'Outfit', serif; }
+        ::-webkit-scrollbar { width: 4px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: #DDE0F0; border-radius: 10px; }
+        .sidebar-active { background-color: #E8EEFF; color: #1845D4; font-weight: 800; }
+
+        .stat-glow-blue { box-shadow: 0 0 0 1px rgba(24,69,212,0.08), 0 4px 24px rgba(24,69,212,0.06); }
+        .stat-glow-amber { box-shadow: 0 0 0 1px rgba(245,158,11,0.10), 0 4px 24px rgba(245,158,11,0.06); }
+        .stat-glow-green { box-shadow: 0 0 0 1px rgba(34,197,94,0.08), 0 4px 24px rgba(34,197,94,0.06); }
+        .stat-glow-emerald { box-shadow: 0 0 0 1px rgba(16,185,129,0.08), 0 4px 24px rgba(16,185,129,0.06); }
+
+        .card-hover { transition: all 0.2s ease; }
+        .card-hover:hover { transform: translateY(-2px); box-shadow: 0 8px 30px rgba(0,0,0,0.08); }
+
+        .live-pulse { animation: livePulse 2s ease-in-out infinite; }
+        @keyframes livePulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.4; }
+        }
+
+        /* Splash Screen */
+        #splash-screen {
+            position: fixed; inset: 0; z-index: 99999;
+            background: #fff;
+            display: flex; align-items: center; justify-content: center;
+            flex-direction: column;
+            transition: opacity 0.4s ease, visibility 0.4s ease;
+        }
+        #splash-screen.hidden {
+            opacity: 0; visibility: hidden; pointer-events: none;
+        }
+        .splash-mark {
+            width: 64px; height: 64px;
+            display: flex; align-items: center; justify-content: center;
+            position: relative;
+        }
+        .splash-ring {
+            position: absolute; inset: 0;
+            border-radius: 50%;
+            border: 3px solid #E8EEFF;
+        }
+        .splash-ring-fill {
+            position: absolute; inset: 0;
+            border-radius: 50%;
+            border: 3px solid transparent;
+            border-top-color: #1845D4;
+            border-right-color: #1845D4;
+            animation: ringSpin 1s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+        }
+        @keyframes ringSpin {
+            from { transform: rotate(0deg); }
+            to { transform: rotate(360deg); }
+        }
+        .splash-icon {
+            font-size: 22px; color: #1845D4;
+            z-index: 1;
+        }
+        .splash-name {
+            margin-top: 20px;
+            font-family: 'Outfit', serif;
+            font-size: 28px; font-weight: 800;
+            color: #0D0D1A;
+            letter-spacing: -0.02em;
+        }
+        .splash-tagline {
+            font-family: 'Inter', sans-serif;
+            font-size: 12px; font-weight: 500;
+            color: #8888A8;
+            letter-spacing: 0.15em;
+            text-transform: uppercase;
+            margin-top: 4px;
+        }
+    </style>
+</head>
+<body class="bg-[#F8F9FC] text-[#0D0D1A] dark:bg-slate-950 dark:text-slate-100 font-sans selection:bg-blue-100 transition-colors duration-200">
+    <!-- Splash Screen -->
+    <div id="splash-screen">
+        <div class="splash-mark">
+            <div class="splash-ring"></div>
+            <div class="splash-ring-fill"></div>
+            <i class="fas fa-graduation-cap splash-icon"></i>
+        </div>
+        <div class="splash-name">Podium</div>
+        <div class="splash-tagline">Your classroom, anywhere</div>
+    </div>
+
+    <div id="top-loading-bar" style="width: 0%"></div>
+    <div class="min-h-screen flex">
+        <!-- Sidebar -->
+        <aside id="sidebar" class="hidden lg:flex w-64 flex-col fixed inset-y-0 bg-white dark:bg-slate-950 border-r border-[#DDE0F0] dark:border-slate-800 z-50 transition-transform duration-300 -translate-x-full lg:translate-x-0">
+            <div class="lg:hidden absolute top-4 right-4">
+                <button id="close-mobile-menu" class="p-2 text-[#8888A8] hover:text-[#0D0D1A]">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <a href="/" class="h-16 px-6 flex items-center gap-2.5 border-b border-[#DDE0F0] dark:border-slate-800">
+                <div class="w-8 h-8 bg-[#1845D4] rounded-lg flex items-center justify-center">
+                    <i class="fas fa-graduation-cap text-white text-sm"></i>
+                </div>
+                <span class="font-sans font-black text-lg text-[#0D0D1A] dark:text-white tracking-tight">Podium</span>
+            </a>
+
+            <nav class="flex-1 px-4 py-6 overflow-y-auto space-y-6">
+                <div>
+                    <p class="px-2 mb-1 text-[10px] font-black text-[#8888A8] uppercase tracking-[0.15em]">Workspace</p>
+                    <div class="space-y-0.5">
+                        <button onclick="navTo('records')" id="nav-records" class="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-[13px] font-semibold transition-all sidebar-active">
+                            <span class="nav-icon w-8 h-8 rounded-lg flex items-center justify-center bg-[#1845D4] text-white shadow-sm">
+                                <i class="fas fa-layer-group text-xs"></i>
+                            </span>
+                            <span class="flex-1 text-left">Classes</span>
+                        </button>
+                        <button onclick="navTo('communities')" id="nav-communities" class="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-[13px] font-semibold transition-all text-[#444460] dark:text-slate-400 hover:bg-[#F5F6FA] dark:hover:bg-slate-800 hover:text-[#0D0D1A] dark:hover:text-white">
+                            <span class="nav-icon w-8 h-8 rounded-lg flex items-center justify-center bg-amber-50 dark:bg-amber-900/20 text-amber-600 transition-colors">
+                                <i class="fas fa-users text-xs"></i>
+                            </span>
+                            <span class="flex-1 text-left">Communities</span>
+                            <span id="communities-live-dot" title="A class is live now" class="hidden shrink-0 w-2 h-2 rounded-full bg-red-500 animate-pulse shadow-[0_0_8px_rgba(239,68,68,0.9)]"></span>
+                        </button>
+                        <button onclick="navTo('attendance')" id="nav-attendance" class="hidden w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-[13px] font-semibold transition-all text-[#444460] dark:text-slate-400 hover:bg-[#F5F6FA] dark:hover:bg-slate-800 hover:text-[#0D0D1A] dark:hover:text-white">
+                            <span class="nav-icon w-8 h-8 rounded-lg flex items-center justify-center bg-emerald-50 dark:bg-emerald-900/20 text-emerald-600 transition-colors">
+                                <i class="fas fa-clipboard-check text-xs"></i>
+                            </span>
+                            <span class="flex-1 text-left">Attendance</span>
+                        </button>
+                        <button onclick="navTo('recordings')" id="nav-recordings" class="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-[13px] font-semibold transition-all text-[#444460] dark:text-slate-400 hover:bg-[#F5F6FA] dark:hover:bg-slate-800 hover:text-[#0D0D1A] dark:hover:text-white">
+                            <span class="nav-icon w-8 h-8 rounded-lg flex items-center justify-center bg-rose-50 dark:bg-rose-900/20 text-rose-600 transition-colors">
+                                <i class="fas fa-video text-xs"></i>
+                            </span>
+                            <span class="flex-1 text-left">Recordings</span>
+                        </button>
+                        <a href="./history.html" class="flex items-center gap-3 px-3 py-2.5 rounded-lg text-[13px] font-semibold transition-all text-[#444460] dark:text-slate-400 hover:bg-[#F5F6FA] dark:hover:bg-slate-800 hover:text-[#0D0D1A] dark:hover:text-white">
+                            <span class="nav-icon w-8 h-8 rounded-lg flex items-center justify-center bg-purple-50 dark:bg-purple-900/20 text-purple-600 transition-colors">
+                                <i class="fas fa-history text-xs"></i>
+                            </span>
+                            <span class="flex-1 text-left">History</span>
+                        </a>
+                        <a href="./wallet.html" class="flex items-center gap-3 px-3 py-2.5 rounded-lg text-[13px] font-semibold transition-all text-[#444460] dark:text-slate-400 hover:bg-[#F5F6FA] dark:hover:bg-slate-800 hover:text-[#0D0D1A] dark:hover:text-white">
+                            <span class="nav-icon w-8 h-8 rounded-lg flex items-center justify-center bg-emerald-50 dark:bg-emerald-900/20 text-emerald-600 transition-colors">
+                                <i class="fas fa-wallet text-xs"></i>
+                            </span>
+                            <span class="flex-1 text-left">Transactions</span>
+                        </a>
+                    </div>
+                </div>
+
+                <div id="admin-nav-section" class="hidden">
+                    <p class="px-2 mb-1 text-[10px] font-black text-red-500 uppercase tracking-[0.15em]">Admin</p>
+                    <div class="space-y-0.5">
+                        <a href="./admin.html" target="_blank" class="flex items-center gap-3 px-3 py-2.5 rounded-lg text-[13px] font-semibold transition-all text-[#444460] dark:text-slate-400 hover:bg-red-50 dark:hover:bg-red-900/20 hover:text-red-600 dark:hover:text-red-400 group/item">
+                            <span class="w-8 h-8 rounded-lg flex items-center justify-center bg-red-50 dark:bg-red-900/20 text-red-500 group-hover/item:bg-red-100 dark:group-hover/item:bg-red-900/30 transition-colors">
+                                <i class="fas fa-shield-alt text-xs"></i>
+                            </span>
+                            <span class="flex-1 text-left">Control Panel</span>
+                            <i class="fas fa-external-link-alt text-[8px] opacity-30 group-hover/item:opacity-60 transition-opacity"></i>
+                        </a>
+                    </div>
+                </div>
+            </nav>
+
+            <div class="p-4 border-t border-[#DDE0F0] dark:border-slate-800 space-y-2">
+                <button id="theme-toggle" class="w-full flex items-center gap-3 px-3 py-2 rounded-lg text-[12px] font-semibold transition-all text-[#8888A8] hover:bg-[#F5F6FA] dark:hover:bg-slate-800 group">
+                    <i id="theme-icon" class="fas fa-moon w-4 h-4"></i>
+                    <span>Toggle theme</span>
+                </button>
+                <a href="./profile.html" id="user-profile-preview" class="flex items-center gap-3 px-3 py-2 rounded-xl hover:bg-[#F5F6FA] dark:hover:bg-slate-800 transition-all group">
+                    <div id="user-avatar" class="w-9 h-9 rounded-xl bg-[#1845D4] flex items-center justify-center text-white text-xs font-black shadow-sm shrink-0">U</div>
+                    <div class="flex-1 min-w-0">
+                        <p id="user-name" class="text-[13px] font-bold text-[#0D0D1A] dark:text-slate-100 truncate">User</p>
+                        <p id="user-role" class="text-[10px] font-bold text-[#8888A8] dark:text-slate-500 uppercase tracking-widest truncate">Student</p>
+                    </div>
+                    <i class="fas fa-chevron-right text-[8px] text-[#8888A8] group-hover:translate-x-0.5 transition-transform"></i>
+                </a>
+                <button id="alerts-bell" class="w-full flex items-center gap-3 px-3 py-2 rounded-lg text-[12px] font-semibold transition-all text-[#8888A8] hover:bg-[#F5F6FA] dark:hover:bg-slate-800">
+                    <span class="relative inline-flex">
+                        <i class="fas fa-bell w-4 h-4"></i>
+                        <span data-alerts-count class="hidden absolute -top-1.5 -right-2 min-w-[15px] h-[15px] px-1 rounded-full bg-red-500 text-white text-[8px] font-black items-center justify-center">0</span>
+                    </span>
+                    <span>Alerts</span>
+                </button>
+                <button id="logout-btn" class="w-full flex items-center gap-3 px-3 py-2 rounded-lg text-[12px] font-semibold text-[#8888A8] hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 transition-all">
+                    <i class="fas fa-sign-out-alt w-4 h-4"></i>
+                    <span>Sign out</span>
+                </button>
+            </div>
+        </aside>
+
+        <!-- Sidebar Overlay -->
+        <div id="sidebar-overlay" class="fixed inset-0 bg-[#0D0D1A]/40 backdrop-blur-sm z-40 hidden lg:hidden"></div>
+
+        <!-- Mobile Header -->
+        <div class="lg:hidden fixed top-0 left-0 right-0 h-16 bg-white dark:bg-slate-950 border-b border-[#DDE0F0] dark:border-slate-800 flex items-center justify-between px-5 z-40">
+            <a href="/" class="font-serif font-black text-[#1845D4] text-lg tracking-tighter">Podium</a>
+            <div class="flex items-center gap-2">
+                <button id="alerts-bell-mobile" class="relative p-2 text-[#0D0D1A] dark:text-white bg-[#F5F6FA] dark:bg-slate-800 rounded-lg">
+                    <i class="fas fa-bell"></i>
+                    <span data-alerts-count class="hidden absolute -top-1 -right-1 min-w-[16px] h-4 px-1 rounded-full bg-red-500 text-white text-[9px] font-black items-center justify-center">0</span>
+                </button>
+                <button id="mobile-menu-btn" class="p-2 text-[#0D0D1A] dark:text-white bg-[#F5F6FA] dark:bg-slate-800 rounded-lg">
+                    <i class="fas fa-bars"></i>
+                </button>
+            </div>
+        </div>
+
+        <!-- Class alerts panel -->
+        <div id="alerts-panel" class="hidden fixed right-4 top-20 lg:top-24 w-[min(22rem,calc(100vw-2rem))] z-[130] bg-white dark:bg-slate-900 border border-[#DDE0F0] dark:border-slate-800 rounded-2xl shadow-2xl overflow-hidden">
+            <div class="flex items-center justify-between px-4 py-3 border-b border-[#DDE0F0] dark:border-slate-800">
+                <p class="text-[10px] font-black uppercase tracking-widest text-[#8888A8]">Class alerts</p>
+                <button id="alerts-mark-read" class="text-[10px] font-bold text-[#1845D4] hover:underline">Mark all read</button>
+            </div>
+            <div id="alerts-list" class="max-h-80 overflow-y-auto divide-y divide-[#F5F6FA] dark:divide-slate-800"></div>
+        </div>
+
+        <!-- Main Content -->
+        <main class="flex-1 flex flex-col min-w-0 lg:pl-60 pt-16 lg:pt-0">
+            <div class="flex-1 px-5 py-6 lg:px-10 lg:py-8 max-w-6xl mx-auto w-full space-y-8">
+
+                <!-- ============ HOME TAB ============ -->
+                <div id="content-records" class="content-section space-y-8">
+
+                    <!-- Header Row -->
+                    <div class="flex flex-col sm:flex-row sm:items-end justify-between gap-4">
+                        <div>
+                            <h1 class="text-2xl lg:text-3xl font-bold text-[#0D0D1A] dark:text-white tracking-tight">
+                                Good <span id="greeting-time" class="text-[#1845D4]">morning</span><!-- JS fills -->, <span id="greeting-name">there</span>
+                            </h1>
+                            <p id="today-date" class="text-sm text-[#8888A8] font-medium mt-1">Loading...</p>
+                        </div>
+                        <button id="open-create-modal" class="hidden px-5 py-2.5 bg-[#1845D4] text-white text-[13px] font-bold rounded-lg hover:bg-[#0F2FA8] transition-all flex items-center gap-2 shadow-lg shadow-blue-600/10">
+                            <i class="fas fa-plus text-xs"></i> New class
+                        </button>
+                    </div>
+
+                    <!-- Quick Join (compact, above stats) -->
+                    <div class="bg-white dark:bg-slate-900 rounded-xl px-5 py-4 border border-[#DDE0F0] dark:border-slate-800 flex flex-col sm:flex-row sm:items-center gap-3">
+                        <p class="text-[11px] font-bold text-[#8888A8] uppercase tracking-widest whitespace-nowrap">Join a class</p>
+                        <form id="join-form" class="flex gap-2 flex-1">
+                            <input type="text" id="join-link" placeholder="Enter meeting code..." class="flex-1 min-w-0 px-4 py-2.5 bg-[#F5F6FA] dark:bg-slate-800 border border-[#DDE0F0] dark:border-slate-700 rounded-lg text-[13px] font-medium outline-none focus:border-[#1845D4] focus:ring-2 focus:ring-blue-600/10 transition-all" autocomplete="off">
+                            <button type="submit" class="px-5 py-2.5 bg-[#1845D4] text-white rounded-lg text-[13px] font-bold hover:bg-[#0F2FA8] transition-all shadow-md shadow-blue-600/10 shrink-0">Join</button>
+                        </form>
+                    </div>
+
+                    <!-- Live now (community classes in session) -->
+                    <div id="home-live-banner" class="hidden">
+                        <div id="home-live-card" class="flex items-center gap-3 bg-white dark:bg-slate-900 border border-red-200 dark:border-red-500/25 border-l-4 border-l-red-500 rounded-xl px-4 py-3 shadow-sm">
+                            <span class="relative flex w-2 h-2 shrink-0">
+                                <span id="home-live-ping" class="absolute inline-flex w-full h-full rounded-full bg-red-400 opacity-60 animate-ping"></span>
+                                <span id="home-live-dot" class="relative inline-flex w-2 h-2 rounded-full bg-red-500"></span>
+                            </span>
+                            <div class="flex-1 min-w-0">
+                                <p id="home-live-label" class="text-[9px] font-black text-red-600 dark:text-red-400 uppercase tracking-[0.2em]">Live now</p>
+                                <p id="home-live-line" class="text-[13px] font-bold text-[#0D0D1A] dark:text-white truncate leading-snug"></p>
+                            </div>
+                            <a id="home-live-join" href="#" class="shrink-0 px-4 py-2 rounded-lg bg-[#1845D4] text-white text-[10px] font-black uppercase tracking-widest hover:bg-[#0F2FA8] transition-all">Join</a>
+                        </div>
+                    </div>
+
+                    <!-- Stat Cards -->
+                    <div class="grid grid-cols-2 lg:grid-cols-4 gap-4">
+                        <div onclick="window.openRecordsDrawer('join')" class="bg-white dark:bg-slate-900 rounded-xl p-5 border border-[#DDE0F0] dark:border-slate-800 stat-glow-blue cursor-pointer card-hover group">
+                            <div class="flex items-center gap-3 mb-3">
+                                <div class="w-10 h-10 rounded-lg bg-blue-50 dark:bg-blue-900/20 flex items-center justify-center text-[#1845D4]">
+                                    <i class="fas fa-book-open text-sm"></i>
+                                </div>
+                                <span class="text-[11px] font-bold text-[#8888A8] uppercase tracking-widest">Enrolled</span>
+                            </div>
+                            <div id="enrolled-count" class="text-3xl font-bold text-[#0D0D1A] dark:text-white tracking-tight tabular-nums">0</div>
+                        </div>
+
+                        <div onclick="window.openRecordsDrawer('host')" class="bg-white dark:bg-slate-900 rounded-xl p-5 border border-[#DDE0F0] dark:border-slate-800 stat-glow-amber cursor-pointer card-hover group">
+                            <div class="flex items-center gap-3 mb-3">
+                                <div class="w-10 h-10 rounded-lg bg-amber-50 dark:bg-amber-900/20 flex items-center justify-center text-amber-600">
+                                    <i class="fas fa-chalkboard-teacher text-sm"></i>
+                                </div>
+                                <span class="text-[11px] font-bold text-[#8888A8] uppercase tracking-widest">Hosted</span>
+                            </div>
+                            <div id="hosted-count" class="text-3xl font-bold text-[#0D0D1A] dark:text-white tracking-tight tabular-nums">0</div>
+                        </div>
+
+                        <!-- Wallet Balance Card -->
+                        <div onclick="openTopUpModal()" class="bg-white dark:bg-slate-900 rounded-xl p-5 border border-[#DDE0F0] dark:border-slate-800 stat-glow-green cursor-pointer card-hover group">
+                            <div class="flex items-center gap-3 mb-3">
+                                <div class="w-10 h-10 rounded-lg bg-green-50 dark:bg-green-900/20 flex items-center justify-center text-green-600">
+                                    <i class="fas fa-wallet text-sm"></i>
+                                </div>
+                                <span class="text-[11px] font-bold text-[#8888A8] uppercase tracking-widest">Wallet</span>
+                                <button onclick="event.stopPropagation(); refreshWallet()" class="ml-auto w-7 h-7 rounded-lg flex items-center justify-center text-[#8888A8] hover:bg-green-50 dark:hover:bg-green-900/20 hover:text-green-600 transition-all" title="Refresh balance">
+                                    <i id="wallet-refresh-icon" class="fas fa-sync-alt text-[10px]"></i>
+                                </button>
+                            </div>
+                            <div id="wallet-balance" class="text-2xl font-bold text-[#0D0D1A] dark:text-white tracking-tight tabular-nums">GHS 0</div>
+                            <p class="text-[11px] text-green-600 font-semibold mt-2 opacity-0 group-hover:opacity-100 transition-all">Top up <i class="fas fa-arrow-right text-[9px]"></i></p>
+                        </div>
+
+                        <!-- Quick Stats Card -->
+                        <div class="bg-white dark:bg-slate-900 rounded-xl p-5 border border-[#DDE0F0] dark:border-slate-800 stat-glow-emerald">
+                            <div class="flex items-center gap-3 mb-3">
+                                <div class="w-10 h-10 rounded-lg bg-emerald-50 dark:bg-emerald-900/20 flex items-center justify-center text-emerald-600">
+                                    <i class="fas fa-clipboard-check text-sm"></i>
+                                </div>
+                                <span class="text-[11px] font-bold text-[#8888A8] uppercase tracking-widest">Sessions</span>
+                            </div>
+                            <div id="total-sessions-count" class="text-3xl font-bold text-[#0D0D1A] dark:text-white tracking-tight tabular-nums">0</div>
+                        </div>
+                    </div>
+
+                    <!-- Quick Access / Jump Back In -->
+                    <div id="quick-access-section" class="hidden space-y-4">
+                        <div class="flex items-center gap-3">
+                            <span class="w-2 h-2 bg-red-500 rounded-full live-pulse"></span>
+                            <h2 class="text-[12px] font-bold text-[#0D0D1A] dark:text-white uppercase tracking-widest">Jump Back In</h2>
+                            <div class="h-px flex-1 bg-[#DDE0F0] dark:bg-slate-800"></div>
+                        </div>
+                        <div id="quick-access-list" class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                            <!-- JS fills dynamically -->
+                        </div>
+                    </div>
+
+                    <!-- Action Cards -->
+                    <div class="grid sm:grid-cols-2 gap-4">
+                        <div id="open-create-modal-card" class="hidden bg-white dark:bg-slate-900 rounded-xl p-6 border border-[#DDE0F0] dark:border-slate-800 card-hover cursor-pointer group">
+                            <div class="w-11 h-11 bg-[#1845D4] rounded-xl flex items-center justify-center mb-4 text-white shadow-lg shadow-blue-600/20 group-hover:scale-110 transition-transform">
+                                <i class="fas fa-plus text-lg"></i>
+                            </div>
+                            <h3 class="text-base font-bold text-[#0D0D1A] dark:text-white mb-1">Create a class</h3>
+                            <p class="text-[13px] text-[#8888A8] leading-relaxed">Set up a new classroom session and invite students.</p>
+                            <span class="inline-block mt-4 text-[13px] font-semibold text-[#1845D4]">Get started <i class="fas fa-arrow-right text-[10px] ml-1 group-hover:ml-2 transition-all"></i></span>
+                        </div>
+
+                        <div onclick="document.getElementById('modal-join-community').classList.remove('hidden')" class="bg-white dark:bg-slate-900 rounded-xl p-6 border border-[#DDE0F0] dark:border-slate-800 card-hover cursor-pointer group">
+                            <div class="w-11 h-11 bg-gradient-to-br from-purple-50 to-blue-50 dark:from-purple-900/20 dark:to-blue-900/20 rounded-xl flex items-center justify-center mb-4 text-purple-600 dark:text-purple-400 group-hover:scale-110 transition-transform">
+                                <i class="fas fa-users text-lg"></i>
+                            </div>
+                            <h3 class="text-base font-bold text-[#0D0D1A] dark:text-white mb-1">Join a community</h3>
+                            <p class="text-[13px] text-[#8888A8] leading-relaxed">Enter a secret code to join a study group or course community.</p>
+                            <span class="inline-block mt-4 text-[13px] font-semibold text-purple-600 dark:text-purple-400">Join space <i class="fas fa-arrow-right text-[10px] ml-1 group-hover:ml-2 transition-all"></i></span>
+                        </div>
+                    </div>
+
+                    <!-- My Classes (inline list) -->
+                    <div class="space-y-4">
+                        <div class="flex items-center justify-between">
+                            <h2 class="text-[12px] font-bold text-[#0D0D1A] dark:text-white uppercase tracking-widest">My Classes</h2>
+                            <div class="flex gap-1 bg-[#DDE0F0]/50 dark:bg-slate-800 rounded-lg p-0.5">
+                                <button onclick="window.switchRecordTab('join')" id="tab-join" class="px-3 py-1.5 rounded-md text-[11px] font-bold transition-all text-[#1845D4] bg-white dark:bg-slate-900 shadow-sm">Enrolled</button>
+                                <button onclick="window.switchRecordTab('host')" id="tab-host" class="px-3 py-1.5 rounded-md text-[11px] font-bold transition-all text-[#8888A8] hover:text-[#0D0D1A] dark:hover:text-white">Hosted</button>
+                            </div>
+                        </div>
+                        <div id="records-list" class="space-y-3">
+                            <div class="h-20 skeleton rounded-xl"></div>
+                            <div class="h-20 skeleton rounded-xl"></div>
+                            <div class="h-20 skeleton rounded-xl"></div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- ============ COMMUNITIES TAB ============ -->
+                <div id="content-communities" class="content-section hidden space-y-10">
+                    <div class="flex flex-col sm:flex-row sm:items-end justify-between gap-4">
+                        <div>
+                            <h1 class="text-2xl lg:text-3xl font-bold text-[#0D0D1A] dark:text-white tracking-tight">Communities</h1>
+                            <p class="text-sm text-[#8888A8] font-medium mt-1">Connect and collaborate with your peers.</p>
+                        </div>
+                        <div class="flex items-center gap-2">
+                            <button id="open-join-community-modal" class="px-4 py-2.5 bg-white dark:bg-slate-900 border border-[#DDE0F0] dark:border-slate-800 text-[#0D0D1A] dark:text-white text-[13px] font-semibold rounded-lg hover:bg-[#F5F6FA] dark:hover:bg-slate-800 transition-all">Join by Code</button>
+                            <button id="open-create-community-modal" class="px-5 py-2.5 bg-[#1845D4] text-white text-[13px] font-bold rounded-lg hover:bg-[#0F2FA8] transition-all flex items-center gap-2">
+                                <i class="fas fa-plus text-xs"></i> Create Space
+                            </button>
+                        </div>
+                    </div>
+
+                    <div class="space-y-8">
+                        <div class="space-y-4">
+                            <h3 class="text-[12px] font-bold text-[#8888A8] uppercase tracking-widest">My Communities</h3>
+                            <div id="my-communities-list" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
+                                <div class="h-48 skeleton rounded-xl"></div>
+                                <div class="h-48 skeleton rounded-xl"></div>
+                                <div class="h-48 skeleton rounded-xl"></div>
+                            </div>
+                        </div>
+
+                        <div class="space-y-4">
+                            <h3 class="text-[12px] font-bold text-[#8888A8] uppercase tracking-widest">Discover</h3>
+                            <div id="public-communities-list" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5"></div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- ============ ATTENDANCE TAB ============ -->
+                <div id="content-attendance" class="content-section hidden space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
+                    <div class="flex flex-col sm:flex-row sm:items-end justify-between gap-4">
+                        <div>
+                            <h2 class="text-2xl lg:text-3xl font-bold text-[#0D0D1A] dark:text-white tracking-tight">Attendance Registry</h2>
+                            <p class="text-sm text-[#8888A8] font-medium mt-1">Manage and export your class attendance records</p>
+                        </div>
+                        <div class="px-5 py-3 bg-white dark:bg-slate-900 border border-[#DDE0F0] dark:border-slate-800 rounded-xl shadow-sm">
+                            <span class="text-[10px] font-bold text-[#8888A8] uppercase tracking-widest block mb-0.5">Total Reports</span>
+                            <span id="attendance-total-count" class="text-2xl font-bold text-[#0D0D1A] dark:text-white tabular-nums">0</span>
+                        </div>
+                    </div>
+
+                    <div id="attendance-list" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
+                        <div class="h-48 skeleton rounded-xl"></div>
+                        <div class="h-48 skeleton rounded-xl"></div>
+                        <div class="h-48 skeleton rounded-xl"></div>
+                    </div>
+                </div>
+
+                <!-- ============ RECORDINGS TAB ============ -->
+                <div id="content-recordings" class="content-section hidden space-y-8">
+                    <div class="flex flex-col sm:flex-row sm:items-end justify-between gap-4">
+                        <div>
+                            <h2 class="text-2xl lg:text-3xl font-bold text-[#0D0D1A] dark:text-white tracking-tight">Recordings</h2>
+                            <p class="text-sm text-[#8888A8] font-medium mt-1">Download and manage your class recordings.</p>
+                        </div>
+                    </div>
+                    <div id="recordings-list" class="space-y-4">
+                    </div>
+                </div>
+
+            </div>
+        </main>
+    </div>
+
+    <!-- ============ DRAWER & MODALS (unchanged structure) ============ -->
+
+    <!-- Records Drawer -->
+    <div id="records-drawer-backdrop" onclick="window.closeRecordsDrawer()" class="hidden fixed inset-0 bg-[#0D0D1A]/30 backdrop-blur-sm z-[90]"></div>
+    <div id="records-drawer" class="fixed top-0 right-0 h-full w-full max-w-lg bg-white dark:bg-slate-900 border-l border-[#DDE0F0] dark:border-slate-800 shadow-2xl z-[95] translate-x-full transition-transform duration-300 ease-in-out flex flex-col">
+        <div class="flex items-center justify-between px-6 py-5 border-b border-[#DDE0F0] dark:border-slate-800 flex-shrink-0">
+            <div>
+                <h2 id="drawer-title" class="text-base font-bold text-[#0D0D1A] dark:text-white">Classes Joined</h2>
+                <p id="drawer-subtitle" class="text-[10px] font-bold text-[#8888A8] uppercase tracking-widest mt-0.5">Academic Record</p>
+            </div>
+            <button onclick="window.closeRecordsDrawer()" class="w-8 h-8 flex items-center justify-center border border-[#DDE0F0] dark:border-slate-800 rounded-lg text-[#444460] dark:text-slate-400 hover:bg-[#F5F6FA] dark:hover:bg-slate-950 hover:text-[#0D0D1A] dark:hover:text-white transition-all">
+                <i class="fas fa-times text-xs"></i>
+            </button>
+        </div>
+        <div id="records-list-drawer" class="flex-1 overflow-y-auto divide-y divide-[#F5F6FA] dark:divide-slate-800">
+        </div>
+    </div>
+
+    <!-- Workspace View -->
+    <div id="workspace-view" class="hidden fixed inset-0 z-[100] bg-[#F8F9FC] dark:bg-[#080810]">
+        <!-- Mobile Top Bar -->
+        <div class="lg:hidden fixed top-0 left-0 right-0 h-16 bg-white dark:bg-slate-950 border-b border-[#DDE0F0] dark:border-slate-800 flex items-center justify-between px-4 z-40">
+            <button id="ws-mobile-menu-btn" class="p-2 text-[#0D0D1A] dark:text-white bg-[#F5F6FA] dark:bg-slate-800 rounded-lg" aria-label="Menu">
+                <i class="fas fa-bars"></i>
+            </button>
+            <div class="text-center min-w-0 px-2">
+                <h2 class="workspace-title text-[15px] font-bold text-[#0D0D1A] dark:text-white truncate">Community Name</h2>
+                <p class="workspace-code text-[9px] font-bold text-[#8888A8] uppercase tracking-widest">CODE: XXXXXX</p>
+            </div>
+            <button id="ws-mobile-exit-btn" class="p-2 text-[#8888A8] hover:text-[#0D0D1A] dark:hover:text-white rounded-lg" aria-label="Exit">
+                <i class="fas fa-arrow-left"></i>
+            </button>
+        </div>
+
+        <!-- Sidebar Overlay (mobile) -->
+        <div id="ws-sidebar-overlay" class="fixed inset-0 bg-[#0D0D1A]/40 z-40 hidden lg:hidden"></div>
+
+        <!-- Sidebar -->
+        <aside id="ws-sidebar" class="hidden lg:flex w-64 flex-col fixed inset-y-0 bg-white dark:bg-slate-950 border-r border-[#DDE0F0] dark:border-slate-800 z-50 transition-transform duration-300 -translate-x-full lg:translate-x-0">
+            <div class="h-16 px-4 flex items-center gap-2.5 border-b border-[#DDE0F0] dark:border-slate-800">
+                <div class="w-9 h-9 bg-[#1845D4] rounded-lg flex items-center justify-center shrink-0">
+                    <i class="fas fa-users text-white text-xs"></i>
+                </div>
+                <div class="min-w-0 flex-1">
+                    <h2 class="workspace-title text-[14px] font-bold text-[#0D0D1A] dark:text-white truncate">Community Name</h2>
+                    <p class="workspace-code text-[9px] font-bold text-[#8888A8] uppercase tracking-widest truncate">CODE: XXXXXX</p>
+                </div>
+                <button id="ws-close-mobile-menu" class="lg:hidden p-1.5 text-[#8888A8] hover:text-[#0D0D1A] dark:hover:text-white" aria-label="Close menu">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <nav class="flex-1 px-3 py-5 space-y-1">
+                <button onclick="window.switchWorkspaceTab('bulletin')" id="w-tab-bulletin" class="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-[13px] font-semibold transition-all">
+                    <i class="fas fa-bullhorn w-4 text-center"></i> Bulletin
+                </button>
+                <button onclick="window.switchWorkspaceTab('live')" id="w-tab-live" class="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-[13px] font-semibold transition-all">
+                    <i class="fas fa-video w-4 text-center"></i> <span class="flex-1 text-left">Live Classes</span>
+                    <span id="live-indicator" class="hidden w-1.5 h-1.5 bg-red-500 rounded-full animate-pulse"></span>
+                </button>
+                <button onclick="window.switchWorkspaceTab('resources')" id="w-tab-resources" class="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-[13px] font-semibold transition-all">
+                    <i class="fas fa-folder-open w-4 text-center"></i> Resources
+                </button>
+                <button onclick="window.switchWorkspaceTab('members')" id="w-tab-members" class="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-[13px] font-semibold transition-all">
+                    <i class="fas fa-users w-4 text-center"></i> Members
+                </button>
+                <button onclick="window.switchWorkspaceTab('requests')" id="w-tab-requests" class="hidden w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-[13px] font-semibold transition-all">
+                    <i class="fas fa-user-plus w-4 text-center"></i> <span class="flex-1 text-left">Requests</span>
+                    <span id="requests-count" class="bg-[#1845D4] text-white px-2 py-0.5 rounded-full text-[9px] font-bold">0</span>
+                </button>
+            </nav>
+            <div class="p-4 border-t border-[#DDE0F0] dark:border-slate-800 space-y-2">
+                <button id="header-grant-lecturer-btn" class="hidden w-full flex items-center justify-center gap-1.5 px-4 py-2.5 bg-[#1845D4] hover:bg-[#0F2FA8] text-white rounded-lg text-[11px] font-bold uppercase tracking-wider transition-all">
+                    <i class="fas fa-user-plus text-xs"></i> Grant Lecturer
+                </button>
+                <button id="close-workspace" class="w-full flex items-center gap-3 px-3 py-2 rounded-lg text-[12px] font-semibold text-[#8888A8] hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 transition-all">
+                    <i class="fas fa-sign-out-alt w-4"></i>
+                    <span>Exit Workspace</span>
+                </button>
+            </div>
+        </aside>
+
+        <!-- Main Content -->
+        <main class="h-full overflow-y-auto lg:pl-64 pt-16 lg:pt-0">
+            <div class="max-w-5xl mx-auto px-5 py-6 lg:px-8 lg:py-8 space-y-8">
+                    <div id="w-content-bulletin" class="space-y-6">
+                        <div id="announcement-composer" class="hidden bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 overflow-hidden focus-within:border-[#1845D4] focus-within:ring-2 focus-within:ring-[#1845D4]/10 transition-all">
+                            <textarea id="announcement-text" class="w-full px-4 pt-4 pb-2 bg-transparent border-0 outline-none text-[14px] font-medium resize-none text-slate-800 dark:text-slate-100 placeholder:text-slate-400" rows="3" placeholder="Share an update with your community…"></textarea>
+                            <div class="flex items-center justify-between px-4 py-2.5 bg-slate-50 dark:bg-slate-950/60 border-t border-slate-100 dark:border-slate-800">
+                                <span class="text-[10px] text-slate-400 font-medium">Visible to all members</span>
+                                <button id="post-announcement" class="px-5 py-2 bg-[#1845D4] hover:bg-[#0F2FA8] disabled:opacity-40 disabled:cursor-not-allowed text-white rounded-lg text-[11px] font-bold uppercase tracking-wider transition-all">Post</button>
+                            </div>
+                        </div>
+                        <div id="announcements-list" class="space-y-4"></div>
+                    </div>
+
+                    <div id="w-content-live" class="hidden space-y-4">
+                        <div class="flex items-center justify-between gap-4">
+                            <h3 class="text-[12px] font-bold text-[#8888A8] uppercase tracking-widest">Live Classes</h3>
+                            <button id="community-create-class-btn" class="hidden px-4 py-2 bg-[#1845D4] hover:bg-[#0F2FA8] text-white rounded-lg text-[11px] font-bold uppercase tracking-wider transition-all flex items-center gap-2">
+                                <i class="fas fa-plus text-[10px]"></i> Create Class
+                            </button>
+                        </div>
+                        <div id="community-live-banner" class="hidden rounded-xl border border-red-200 dark:border-red-900/40 bg-red-50 dark:bg-red-950/30 px-5 py-4 flex items-center gap-3">
+                            <span class="w-2.5 h-2.5 rounded-full bg-red-500 animate-pulse shrink-0"></span>
+                            <div class="min-w-0 flex-1">
+                                <p class="text-[13px] font-bold text-red-700 dark:text-red-300 truncate" id="community-live-banner-title">A class is live</p>
+                                <p class="text-[11px] text-red-600/80 dark:text-red-400/70">Your lecturer has started a class — members were alerted by email.</p>
+                            </div>
+                            <button id="community-live-banner-join" class="shrink-0 px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg text-[11px] font-bold uppercase tracking-wider transition-all">Join Now</button>
+                        </div>
+                        <div id="workspace-live-list" class="grid grid-cols-1 md:grid-cols-2 gap-4"></div>
+                    </div>
+
+                    <div id="w-content-resources" class="hidden space-y-8">
+                        <div class="flex items-center gap-4 pb-4 border-b border-[#DDE0F0] dark:border-slate-800">
+                            <h3 class="text-lg font-bold text-[#0D0D1A] dark:text-white tracking-tight">The Library</h3>
+                            <p class="text-[12px] text-[#8888A8]">Study materials and references</p>
+                        </div>
+                        <div id="resource-composer" class="hidden grid grid-cols-1 md:grid-cols-2 gap-5">
+                            <div class="bg-white dark:bg-slate-900 rounded-xl p-5 border border-[#DDE0F0] dark:border-slate-800 space-y-4">
+                                <h4 class="text-[10px] font-bold text-[#1845D4] uppercase tracking-wider flex items-center gap-2"><i class="fas fa-bookmark"></i> Catalog Reference</h4>
+                                <input id="res-link-title" class="w-full px-0 py-2 border-b border-[#DDE0F0] dark:border-slate-700 bg-transparent focus:border-[#1845D4] outline-none text-[14px] font-medium text-slate-900 dark:text-white" placeholder="Title (e.g. Course Syllabus)">
+                                <div class="flex gap-3 items-end">
+                                    <input id="res-link-url" class="flex-1 px-0 py-2 border-b border-[#DDE0F0] dark:border-slate-700 bg-transparent focus:border-[#1845D4] outline-none text-[14px] text-slate-900 dark:text-white" placeholder="Paste URL here...">
+                                    <button id="share-link" class="px-5 py-2 bg-[#1845D4] text-white rounded-lg text-[11px] font-bold uppercase tracking-wider hover:bg-[#0F2FA8] transition-all">Index</button>
+                                </div>
+                            </div>
+                            <div class="bg-white dark:bg-slate-900 rounded-xl p-5 border border-[#DDE0F0] dark:border-slate-800 space-y-4">
+                                <h4 class="text-[10px] font-bold text-[#1845D4] uppercase tracking-wider flex items-center gap-2"><i class="fas fa-archive"></i> Archive Material</h4>
+                                <label class="w-full h-16 border-2 border-dashed border-[#8888A8]/40 dark:border-slate-700 rounded-lg flex items-center justify-center gap-3 cursor-pointer hover:border-[#1845D4] hover:bg-[#F5F6FA] dark:hover:bg-slate-800 transition-all">
+                                    <i class="fas fa-upload text-xs text-[#1845D4]"></i>
+                                    <span class="text-[11px] font-bold text-[#1845D4] uppercase tracking-widest">Select Document</span>
+                                    <input type="file" id="res-file-input" class="hidden">
+                                </label>
+                                <div id="upload-progress-container" class="hidden h-1 w-full bg-[#DDE0F0] dark:bg-slate-800 rounded-full overflow-hidden">
+                                    <div id="upload-progress-bar" class="h-full bg-[#1845D4] transition-all duration-300" style="width: 0%"></div>
+                                </div>
+                            </div>
+                        </div>
+                        <div id="resources-list" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6"></div>
+                    </div>
+
+                    <div id="w-content-members" class="hidden space-y-6">
+                        <div id="lecturer-management-section" class="hidden bg-white dark:bg-slate-900 border border-[#DDE0F0] dark:border-slate-800 rounded-xl p-5 mb-6">
+                            <h4 class="text-[11px] font-bold text-[#1845D4] uppercase tracking-widest mb-3">Grant Lecturer Access</h4>
+                            <p class="text-[12px] text-[#8888A8] mb-3">Allow a lecturer to create classes for this space.</p>
+                            <div class="flex gap-2">
+                                <input id="grant-lecturer-email" type="email" class="flex-1 px-4 py-2 border border-[#DDE0F0] dark:border-slate-800 rounded-lg outline-none text-[13px] font-medium dark:bg-slate-950 focus:border-[#1845D4]" placeholder="Lecturer's Email">
+                                <button id="grant-lecturer-btn" class="px-6 py-2 bg-[#1845D4] text-white rounded-lg text-[11px] font-bold uppercase tracking-widest hover:bg-[#0F2FA8] transition-all">Grant</button>
+                            </div>
+                        </div>
+                        <div class="bg-white rounded-xl border border-[#DDE0F0] overflow-hidden shadow-sm">
+                            <table class="w-full text-left border-collapse">
+                                <thead class="bg-[#F5F6FA] border-b border-[#DDE0F0]">
+                                    <tr class="text-[10px] font-bold text-[#8888A8] uppercase tracking-[0.1em]">
+                                        <th class="px-6 py-4">Identity</th>
+                                        <th class="px-6 py-4">Role</th>
+                                        <th id="members-action-head" class="hidden px-6 py-4 text-right">Action</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="members-list" class="divide-y divide-[#F5F6FA]"></tbody>
+                            </table>
+                        </div>
+                    </div>
+
+                    <div id="w-content-requests" class="hidden space-y-4"></div>
+            </div>
+        </main>
+    </div>
+
+    <!-- Create Class Modal -->
+    <div id="modal-create-class" class="hidden fixed inset-0 z-[110] flex items-center justify-center p-6">
+        <div class="absolute inset-0 bg-[#0D0D1A]/50 backdrop-blur-sm modal-overlay"></div>
+        <div class="bg-white dark:bg-slate-900 w-full max-w-xl rounded-3xl relative shadow-2xl animate-in zoom-in-95 duration-200 overflow-hidden max-h-[90vh] overflow-y-auto">
+            <div class="p-8 lg:p-10">
+                <div class="flex items-center justify-between mb-8">
+                    <div>
+                        <h2 class="text-2xl font-bold text-[#0D0D1A] dark:text-white tracking-tight">Create Class</h2>
+                        <p class="text-sm text-[#8888A8] font-medium mt-1">Set up your session and invite students.</p>
+                    </div>
+                    <button class="close-modal w-10 h-10 flex items-center justify-center rounded-xl border border-[#DDE0F0] dark:border-slate-700 text-[#444460] dark:text-slate-400 hover:bg-[#F5F6FA] dark:hover:bg-slate-800 transition-colors">
+                        <i class="fas fa-times text-sm"></i>
+                    </button>
+                </div>
+                <form id="create-class-form" class="space-y-5">
+                    <div class="space-y-1.5">
+                        <label class="text-[12px] font-bold text-[#0D0D1A] dark:text-slate-200">Session Title <span class="text-red-500">*</span></label>
+                        <input type="text" id="class-title" required placeholder="e.g. Introduction to Data Structures" class="w-full px-4 py-3 bg-[#F5F6FA] dark:bg-slate-800 border border-transparent focus:border-[#1845D4] focus:bg-white dark:focus:bg-slate-900 rounded-xl outline-none text-[14px] transition-all">
+                    </div>
+                    <div class="grid grid-cols-2 gap-4">
+                        <div class="space-y-1.5">
+                            <label class="text-[12px] font-bold text-[#0D0D1A] dark:text-slate-200">Course Code</label>
+                            <input type="text" id="class-course" placeholder="CS 301" class="w-full px-4 py-3 bg-[#F5F6FA] dark:bg-slate-800 border border-transparent focus:border-[#1845D4] focus:bg-white dark:focus:bg-slate-900 rounded-xl outline-none text-[14px] transition-all">
+                        </div>
+                        <div class="space-y-1.5">
+                            <label class="text-[12px] font-bold text-[#0D0D1A] dark:text-slate-200">Program</label>
+                            <input type="text" id="class-program" placeholder="BSc Computer Science" class="w-full px-4 py-3 bg-[#F5F6FA] dark:bg-slate-800 border border-transparent focus:border-[#1845D4] focus:bg-white dark:focus:bg-slate-900 rounded-xl outline-none text-[14px] transition-all">
+                        </div>
+                    </div>
+
+                    <!-- Schedule Section -->
+                    <div class="bg-[#F8F9FF] dark:bg-slate-800/50 rounded-2xl p-5 border border-[#E8EEFF] dark:border-slate-700 space-y-4">
+                        <div class="flex items-center gap-3">
+                            <div class="w-9 h-9 rounded-xl bg-[#1845D4]/10 flex items-center justify-center text-[#1845D4]">
+                                <i class="far fa-calendar-alt text-sm"></i>
+                            </div>
+                            <div>
+                                <p class="text-[13px] font-bold text-[#0D0D1A] dark:text-white">Schedule Start Time</p>
+                                <p class="text-[11px] text-[#8888A8]">Students can only join after this time.</p>
+                            </div>
+                        </div>
+                        <div class="grid grid-cols-2 gap-3">
+                            <div>
+                                <label class="text-[10px] font-bold text-[#8888A8] uppercase tracking-widest block mb-1">Date</label>
+                                <input type="date" id="class-schedule-date" class="w-full px-4 py-3 bg-white dark:bg-slate-900 border border-[#DDE0F0] dark:border-slate-700 focus:border-[#1845D4] rounded-xl outline-none text-[14px] transition-all cursor-pointer">
+                            </div>
+                            <div>
+                                <label class="text-[10px] font-bold text-[#8888A8] uppercase tracking-widest block mb-1">Time</label>
+                                <input type="time" id="class-schedule-time" class="w-full px-4 py-3 bg-white dark:bg-slate-900 border border-[#DDE0F0] dark:border-slate-700 focus:border-[#1845D4] rounded-xl outline-none text-[14px] transition-all cursor-pointer">
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="grid grid-cols-2 gap-4">
+                        <div class="space-y-1.5">
+                            <label class="text-[12px] font-bold text-[#0D0D1A] dark:text-slate-200">Duration (minutes)</label>
+                            <input type="number" id="class-duration" required value="60" min="15" max="480" class="w-full px-4 py-3 bg-[#F5F6FA] dark:bg-slate-800 border border-transparent focus:border-[#1845D4] focus:bg-white dark:focus:bg-slate-900 rounded-xl outline-none text-[14px] transition-all">
+                        </div>
+                        <div class="space-y-1.5">
+                            <label class="text-[12px] font-bold text-[#0D0D1A] dark:text-slate-200">Attendance Checks</label>
+                            <input type="number" id="class-checks" required value="3" min="1" max="10" class="w-full px-4 py-3 bg-[#F5F6FA] dark:bg-slate-800 border border-transparent focus:border-[#1845D4] focus:bg-white dark:focus:bg-slate-900 rounded-xl outline-none text-[14px] transition-all">
+                        </div>
+                    </div>
+
+                    <div class="flex gap-3 justify-end pt-4">
+                        <button type="button" class="close-modal px-6 py-3 text-[#8888A8] dark:text-slate-400 rounded-xl text-[13px] font-bold hover:bg-[#F5F6FA] dark:hover:bg-slate-800 transition-all">Cancel</button>
+                        <button type="submit" class="px-6 py-3 bg-[#1845D4] text-white rounded-xl text-[13px] font-bold hover:bg-[#0F2FA8] transition-all shadow-lg shadow-blue-600/20 active:scale-95">Create Class</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- Join Preview Modal -->
+    <div id="modal-join-preview" class="hidden fixed inset-0 z-[120] flex items-center justify-center p-6">
+        <div class="absolute inset-0 bg-[#0D0D1A]/40 backdrop-blur-sm modal-overlay"></div>
+        <div class="bg-white dark:bg-slate-900 w-full max-w-sm rounded-2xl p-8 lg:p-10 relative shadow-2xl animate-in zoom-in-95 duration-200 text-center">
+            <div class="w-16 h-16 bg-blue-50 dark:bg-blue-900/20 rounded-2xl flex items-center justify-center mx-auto text-[#1845D4] dark:text-blue-400 mb-6 shadow-lg shadow-blue-600/5">
+                <i class="fas fa-graduation-cap text-2xl"></i>
+            </div>
+            <h2 id="join-preview-title" class="text-2xl font-bold text-[#0D0D1A] dark:text-white tracking-tight leading-tight mb-2">Class Title</h2>
+            <p id="join-preview-faculty" class="text-sm text-[#8888A8] font-bold uppercase tracking-widest">Faculty Member</p>
+            <div class="space-y-3 mt-8">
+                <button id="confirm-join" class="w-full py-3.5 bg-[#1845D4] text-white rounded-xl font-bold text-[11px] uppercase tracking-widest shadow-xl shadow-blue-600/10 active:scale-95 transition-all">Enter Classroom</button>
+                <button class="close-modal text-[11px] font-bold text-[#8888A8] uppercase tracking-widest hover:text-[#0D0D1A] dark:hover:text-white transition-all">Go Back</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Community Modals -->
+    <div id="modal-community-create-class" class="hidden fixed inset-0 z-[120] flex items-center justify-center p-6">
+        <div class="absolute inset-0 bg-[#0D0D1A]/60 backdrop-blur-sm" onclick="document.getElementById('modal-community-create-class').classList.add('hidden')"></div>
+        <div class="relative bg-white dark:bg-slate-950 w-full max-w-lg rounded-3xl shadow-2xl border border-[#DDE0F0] dark:border-slate-800 max-h-[90vh] overflow-y-auto">
+            <div class="flex items-center justify-between p-6 border-b border-[#DDE0F0] dark:border-slate-800">
+                <div>
+                    <h2 class="text-xl font-bold text-[#0D0D1A] dark:text-white tracking-tight">Create Class</h2>
+                    <p class="text-[12px] text-[#8888A8] font-medium mt-0.5">For <span id="cc-class-community-name" class="text-[#1845D4] font-bold">this community</span> — members are alerted when it starts.</p>
+                </div>
+                <button class="close-cc-modal w-10 h-10 flex items-center justify-center rounded-xl border border-[#DDE0F0] dark:border-slate-700 text-[#444460] dark:text-slate-400 hover:bg-[#F5F6FA] dark:hover:bg-slate-800 transition-colors">
+                    <i class="fas fa-times text-sm"></i>
+                </button>
+            </div>
+            <form id="community-create-class-form" class="space-y-5 p-6">
+                <div class="space-y-1.5">
+                    <label class="text-[12px] font-bold text-[#0D0D1A] dark:text-slate-200">Class Title <span class="text-red-500">*</span></label>
+                    <input type="text" id="cc-class-title" required placeholder="e.g. Data Structures — Week 4" class="w-full px-4 py-3 bg-[#F5F6FA] dark:bg-slate-800 border border-transparent focus:border-[#1845D4] focus:bg-white dark:focus:bg-slate-900 rounded-xl outline-none text-[14px] transition-all">
+                </div>
+                <div class="grid grid-cols-2 gap-4">
+                    <div class="space-y-1.5">
+                        <label class="text-[12px] font-bold text-[#0D0D1A] dark:text-slate-200">Course Code</label>
+                        <input type="text" id="cc-class-course" placeholder="CS 301" class="w-full px-4 py-3 bg-[#F5F6FA] dark:bg-slate-800 border border-transparent focus:border-[#1845D4] rounded-xl outline-none text-[14px] transition-all">
+                    </div>
+                    <div class="space-y-1.5">
+                        <label class="text-[12px] font-bold text-[#0D0D1A] dark:text-slate-200">Program</label>
+                        <input type="text" id="cc-class-program" placeholder="BSc Computer Science" class="w-full px-4 py-3 bg-[#F5F6FA] dark:bg-slate-800 border border-transparent focus:border-[#1845D4] rounded-xl outline-none text-[14px] transition-all">
+                    </div>
+                </div>
+                <div class="grid grid-cols-2 gap-4">
+                    <div class="space-y-1.5">
+                        <label class="text-[12px] font-bold text-[#0D0D1A] dark:text-slate-200">Duration (minutes)</label>
+                        <input type="number" id="cc-class-duration" required value="60" min="15" max="480" class="w-full px-4 py-3 bg-[#F5F6FA] dark:bg-slate-800 border border-transparent focus:border-[#1845D4] rounded-xl outline-none text-[14px] transition-all">
+                    </div>
+                    <div class="space-y-1.5">
+                        <label class="text-[12px] font-bold text-[#0D0D1A] dark:text-slate-200">Attendance Checks</label>
+                        <input type="number" id="cc-class-checks" required value="3" min="1" max="10" class="w-full px-4 py-3 bg-[#F5F6FA] dark:bg-slate-800 border border-transparent focus:border-[#1845D4] rounded-xl outline-none text-[14px] transition-all">
+                    </div>
+                </div>
+                <div class="bg-[#F8F9FF] dark:bg-slate-800/50 rounded-2xl p-4 border border-[#E8EEFF] dark:border-slate-700 flex items-center gap-3">
+                    <i class="fas fa-info-circle text-[#1845D4]"></i>
+                    <p class="text-[11px] text-[#444460] dark:text-slate-400 font-medium">Only members of this community can join this class. When you go live, every member gets an email alert instantly.</p>
+                </div>
+                <div class="flex gap-3 justify-end pt-2">
+                    <button type="button" class="close-cc-modal px-6 py-3 text-[#8888A8] dark:text-slate-400 rounded-xl text-[13px] font-bold hover:bg-[#F5F6FA] dark:hover:bg-slate-800 transition-all">Cancel</button>
+                    <button type="submit" class="px-6 py-3 bg-[#1845D4] text-white rounded-xl text-[13px] font-bold hover:bg-[#0F2FA8] transition-all shadow-lg shadow-blue-600/20 active:scale-95">Create Class</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <div id="modal-create-community" class="hidden fixed inset-0 z-[110] flex items-center justify-center p-6">
+        <div class="absolute inset-0 bg-[#0D0D1A]/40 backdrop-blur-sm modal-overlay"></div>
+        <div class="bg-white dark:bg-slate-900 w-full max-w-md rounded-2xl p-8 lg:p-10 relative shadow-2xl animate-in zoom-in-95 duration-200">
+            <div class="flex justify-between items-start mb-8">
+                <div><h2 class="text-2xl font-bold text-[#1845D4] tracking-tight">Create Community</h2><p class="text-sm text-[#8888A8] font-medium mt-1">Found a new learning space.</p></div>
+                <button class="close-modal w-8 h-8 flex items-center justify-center border border-[#DDE0F0] dark:border-slate-800 rounded-lg text-[#444460] dark:text-slate-400 hover:bg-[#F5F6FA] dark:hover:bg-slate-950 transition-colors"><i class="fas fa-times text-xs"></i></button>
+            </div>
+            <form id="create-community-form" class="space-y-5">
+                <div class="space-y-1.5"><label class="text-[13px] font-bold text-[#0D0D1A] dark:text-slate-100">Community Name</label><input type="text" id="comm-name" required placeholder="e.g. 2026 CS Morning Group" class="w-full px-4 py-2.5 bg-white dark:bg-slate-950 border-2 border-[#DDE0F0] dark:border-slate-800 focus:border-[#1845D4] rounded-lg outline-none text-[14px] transition-all"></div>
+                <div class="space-y-1.5"><label class="text-[13px] font-bold text-[#0D0D1A] dark:text-slate-100">Description</label><textarea id="comm-desc" required placeholder="Briefly describe what this community is about..." class="w-full h-24 p-4 bg-white dark:bg-slate-950 border-2 border-[#DDE0F0] dark:border-slate-800 focus:border-[#1845D4] rounded-lg outline-none text-[13px] font-medium resize-none"></textarea></div>
+                <div class="flex items-center gap-2 px-1"><input type="checkbox" id="comm-is-public" checked class="w-4 h-4 rounded border-[#DDE0F0] dark:border-slate-800 text-[#1845D4] focus:ring-[#1845D4]"><label for="comm-is-public" class="text-[11px] font-bold text-[#8888A8] uppercase tracking-widest cursor-pointer">Public Discovery</label></div>
+                <div class="flex gap-3 justify-end pt-5">
+                    <button type="button" class="close-modal px-6 py-2.5 border-2 border-[#DDE0F0] dark:border-slate-800 text-[#0D0D1A] dark:text-white rounded-lg text-[14px] font-medium hover:border-[#1845D4]">Cancel</button>
+                    <button type="submit" class="px-6 py-2.5 bg-[#1845D4] text-white rounded-lg text-[14px] font-bold hover:bg-[#0F2FA8] transition-all">Create Community</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <div id="modal-join-community" class="hidden fixed inset-0 z-[110] flex items-center justify-center p-6">
+        <div class="absolute inset-0 bg-[#0D0D1A]/40 backdrop-blur-sm modal-overlay"></div>
+        <div class="bg-white dark:bg-slate-900 w-full max-w-sm rounded-2xl p-8 lg:p-10 relative shadow-2xl animate-in zoom-in-95 duration-200">
+            <div class="flex justify-between items-start mb-8">
+                <div><h2 class="text-2xl font-bold text-[#0D0D1A] dark:text-white tracking-tight">Join Community</h2><p class="text-sm text-[#8888A8] font-medium mt-1">Enter your access code.</p></div>
+                <button class="close-modal w-8 h-8 flex items-center justify-center border border-[#DDE0F0] dark:border-slate-800 rounded-lg text-[#444460] dark:text-slate-400 hover:bg-[#F5F6FA] dark:hover:bg-slate-950 transition-colors"><i class="fas fa-times text-xs"></i></button>
+            </div>
+            <form id="join-community-form" class="space-y-6 text-center">
+                <input type="text" id="comm-join-code" required placeholder="XXXXXX" class="w-full px-6 py-4 bg-[#F5F6FA] dark:bg-slate-950 border border-[#DDE0F0] dark:border-slate-800 focus:border-[#1845D4] rounded-xl outline-none text-xl font-bold text-center tracking-[0.4em] uppercase transition-all">
+                <button type="submit" class="w-full py-4 bg-[#1845D4] text-white rounded-xl font-bold text-[11px] uppercase tracking-widest shadow-xl shadow-blue-600/10 active:scale-95">Request Access</button>
+            </form>
+        </div>
+    </div>
+
+    <!-- Attendance Modal -->
+    <div id="modal-attendance" class="hidden fixed inset-0 z-[110] flex items-center justify-center p-6">
+        <div class="absolute inset-0 bg-[#0D0D1A]/40 backdrop-blur-sm modal-overlay" onclick="document.getElementById('modal-attendance').classList.add('hidden')"></div>
+        <div class="bg-white dark:bg-slate-900 w-full max-w-2xl rounded-2xl p-8 lg:p-10 relative shadow-2xl animate-in zoom-in-95 duration-200 overflow-y-auto max-h-[85vh]">
+            <div class="flex justify-between items-start mb-8">
+                <div>
+                    <h2 class="text-2xl font-bold text-[#0D0D1A] dark:text-white tracking-tight">Attendance Logs</h2>
+                    <p id="attendance-modal-subtitle" class="text-sm text-[#8888A8] font-medium mt-1">Detailed session check-ins</p>
+                </div>
+                <div class="flex gap-2">
+                    <button id="download-attendance-btn" class="hidden px-4 py-2 bg-[#1845D4] text-white text-[10px] font-bold uppercase tracking-widest rounded-lg flex items-center gap-2 hover:bg-[#0F2FA8] transition-all shadow-lg shadow-blue-600/10 active:scale-95"><i class="fas fa-download text-xs"></i> Export</button>
+                    <button onclick="document.getElementById('modal-attendance').classList.add('hidden')" class="w-8 h-8 flex items-center justify-center border border-[#DDE0F0] dark:border-slate-800 rounded-lg text-[#444460] dark:text-slate-400 hover:bg-[#F5F6FA] dark:hover:bg-slate-950">✕</button>
+                </div>
+            </div>
+            <div id="attendance-logs-content" class="space-y-4"></div>
+        </div>
+    </div>
+
+    <!-- Grant Lecturer Modal -->
+    <div id="modal-grant-lecturer" class="hidden fixed inset-0 z-[110] flex items-center justify-center p-6">
+        <div class="absolute inset-0 bg-[#0D0D1A]/40 backdrop-blur-sm modal-overlay" onclick="document.getElementById('modal-grant-lecturer').classList.add('hidden')"></div>
+        <div class="bg-white dark:bg-slate-900 w-full max-w-md rounded-2xl p-8 relative shadow-2xl animate-in zoom-in-95 duration-200">
+            <div class="flex justify-between items-start mb-6">
+                <div>
+                    <h2 class="text-xl font-bold tracking-tight text-slate-900 dark:text-white">Grant Lecturer Access</h2>
+                    <p class="text-[12px] text-slate-500 mt-1">Allow a lecturer to create classes for this space.</p>
+                </div>
+                <button onclick="document.getElementById('modal-grant-lecturer').classList.add('hidden')" class="w-8 h-8 flex items-center justify-center border border-slate-200 dark:border-slate-800 rounded-lg text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-950 transition-colors">✕</button>
+            </div>
+            <div class="space-y-4">
+                <div class="space-y-1.5"><label class="text-[11px] font-bold uppercase tracking-widest text-slate-500">Lecturer's Email</label><input id="grant-lecturer-email-modal" type="email" class="w-full px-4 py-3 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 focus:border-indigo-500 rounded-xl outline-none text-[13px] font-medium transition-all text-slate-800 dark:text-slate-100" placeholder="name@university.edu"></div>
+                <button id="grant-lecturer-btn-modal" class="w-full py-3 bg-[#1845D4] hover:bg-[#0F2FA8] text-white rounded-xl text-[11px] font-bold uppercase tracking-widest transition-all">Grant Access</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Firebase Logic -->
+    <script>
+        // Greeting and name injection
+        (function() {
+            var hour = new Date().getHours();
+            var greeting = hour < 12 ? 'morning' : hour < 17 ? 'afternoon' : 'evening';
+            var el = document.getElementById('greeting-time');
+            if (el) el.textContent = greeting;
+        })();
+    </script>
+    <script type="module" src="./js/sidebar.js?v=18"></script>
+    <script type="module" src="./js/dashboard.js?v=18"></script>
+    <script type="module" src="./js/attendance.js?v=18"></script>
+    
+    <!-- Top-Up Modal -->
+    <div id="modal-topup" class="hidden fixed inset-0 z-[110] flex items-center justify-center p-6">
+        <div class="absolute inset-0 bg-[#0D0D1A]/40 backdrop-blur-sm" onclick="document.getElementById('modal-topup').classList.add('hidden')"></div>
+        <div class="bg-white dark:bg-slate-900 w-full max-w-md rounded-2xl p-8 relative shadow-2xl">
+            <div class="flex justify-between items-start mb-6">
+                <div>
+                    <h2 class="text-xl font-serif font-black tracking-tight text-slate-900 dark:text-white">Top Up Wallet</h2>
+                    <p class="text-[12px] text-slate-500 mt-1">Add funds. GHS 6 deducted per class entry.</p>
+                </div>
+                <button onclick="document.getElementById('modal-topup').classList.add('hidden')" class="w-8 h-8 flex items-center justify-center border border-slate-200 dark:border-slate-800 rounded-lg text-slate-500 hover:bg-slate-100">X</button>
+            </div>
+            <div class="space-y-4">
+                <div class="grid grid-cols-3 gap-3">
+                    <button onclick="setTopUpAmount(500)" class="topup-preset px-4 py-3 bg-slate-50 dark:bg-slate-800 border-2 border-slate-200 dark:border-slate-700 rounded-xl text-sm font-bold hover:border-[#1845D4] transition-all">GHS 5</button>
+                    <button onclick="setTopUpAmount(1000)" class="topup-preset px-4 py-3 bg-slate-50 dark:bg-slate-800 border-2 border-slate-200 dark:border-slate-700 rounded-xl text-sm font-bold hover:border-[#1845D4] transition-all">GHS 10</button>
+                    <button onclick="setTopUpAmount(2000)" class="topup-preset px-4 py-3 bg-slate-50 dark:bg-slate-800 border-2 border-slate-200 dark:border-slate-700 rounded-xl text-sm font-bold hover:border-[#1845D4] transition-all">GHS 20</button>
+                </div>
+                <div>
+                    <label class="text-[10px] font-bold uppercase tracking-widest text-slate-500 block mb-1.5">Custom Amount (GHS)</label>
+                    <input id="topup-amount" type="number" min="1" placeholder="Enter amount" class="w-full px-4 py-3 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 focus:border-[#1845D4] rounded-xl outline-none text-sm font-medium">
+                </div>
+                <button id="topup-btn" onclick="processTopUp()" class="w-full py-3.5 bg-[#1845D4] hover:bg-[#0F2FA8] text-white rounded-xl font-bold text-[10px] uppercase tracking-widest shadow-lg shadow-blue-600/10 active:scale-95">Pay Now</button>
+                <p class="text-[8px] text-[#8888A8] font-bold uppercase tracking-widest text-center">Secure Checkout via Paystack</p>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://js.paystack.co/v2/inline.js"></script>
+    <script src="./js/theme-toggle.js"></script>
+
+    <script type="module">
+        import { auth, db } from './js/firebase-config.js?v=19';
+        import { doc, onSnapshot } from './js/pg-firestore.js?v=1';
+        let currentUser = null;
+        auth.onAuthStateChanged((user) => { if (user) { currentUser = user; loadWalletBalance(); } });
+        function loadWalletBalance() {
+            if (!currentUser) return;
+            onSnapshot(doc(db, 'profiles', currentUser.uid), (snap) => {
+                if (snap.exists()) {
+                    const balance = snap.data().walletBalance || 0;
+                    document.getElementById('wallet-balance').textContent = 'GHS ' + (balance / 100).toFixed(2);
+                }
+            });
+        }
+        window.openTopUpModal = () => { document.getElementById('modal-topup').classList.remove('hidden'); document.getElementById('topup-amount').value = ''; };
+        window.setTopUpAmount = (pesewas) => { document.getElementById('topup-amount').value = pesewas / 100; };
+        window.refreshWallet = async () => {
+            const icon = document.getElementById('wallet-refresh-icon');
+            if (!currentUser || !icon) return;
+            icon.classList.add('animate-spin');
+            try {
+                const token = await currentUser.getIdToken();
+                const res = await fetch('/api/wallet/reconcile', { method: 'POST', headers: { 'Authorization': 'Bearer ' + token } });
+                const data = await res.json();
+                if (data.newBalance !== undefined) {
+                    document.getElementById('wallet-balance').textContent = 'GHS ' + (data.newBalance / 100).toFixed(2);
+                }
+            } catch (e) { console.error('refresh wallet failed', e); }
+            icon.classList.remove('animate-spin');
+        };
+        window.processTopUp = async () => {
+            const amt = parseFloat(document.getElementById('topup-amount').value);
+            if (!amt || amt < 1) return alert('Minimum top-up is GHS 1');
+            const btn = document.getElementById('topup-btn');
+            btn.disabled = true; btn.textContent = 'Initializing...';
+            try {
+                const token = await currentUser.getIdToken();
+                const res = await fetch('/api/wallet/topup/initialize', { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token }, body: JSON.stringify({ amount: Math.round(amt * 100) }) });
+                const data = await res.json();
+                if (!res.ok) throw new Error(data.error || 'Failed');
+
+                const handler = PaystackPop.setup({
+                    key: 'pk_live_dfaef9f68d88d002fdc2e89eb8156370c5fba1dd',
+                    email: currentUser.email || 'student@podiumclass.online',
+                    amount: Math.round(amt * 100),
+                    currency: 'GHS',
+                    ref: data.reference,
+                    channels: ['card', 'mobile_money'],
+                    onClose: () => { btn.disabled = false; btn.textContent = 'Pay Now'; },
+                    callback: async (response) => {
+                        btn.textContent = 'Verifying...';
+                        try {
+                            const vRes = await fetch('/api/paystack/verify', { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token }, body: JSON.stringify({ reference: response.reference }) });
+                            const vData = await vRes.json();
+                            if (vData.success || vData.status) {
+                                document.getElementById('modal-topup').classList.add('hidden');
+                                showToast('Top-up successful!', 'success');
+                            } else {
+                                showToast('Payment received. Balance will update shortly.', 'success');
+                                document.getElementById('modal-topup').classList.add('hidden');
+                            }
+                        } catch (e) {
+                            showToast('Payment received. Balance will update shortly.', 'success');
+                            document.getElementById('modal-topup').classList.add('hidden');
+                        }
+                        btn.disabled = false; btn.textContent = 'Pay Now';
+                    }
+                });
+                handler.openIframe();
+            } catch (e) { alert(e.message || 'Network error'); btn.disabled = false; btn.textContent = 'Pay Now'; }
+        };
+    </script>
+
+</body>
+</html>

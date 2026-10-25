@@ -1,0 +1,50 @@
+# --- Secrets (never commit) -------------------------------------------------
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+
+# --- Python -----------------------------------------------------------------
+__pycache__/
+*.py[cod]
+*.pyo
+.venv/
+venv/
+env/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# --- Databases & backups ----------------------------------------------------
+*.sqlite3
+db.sqlite3
+db.sqlite3-*
+*.bak
+*.bak-*
+*.dump
+
+# --- Django -----------------------------------------------------------------
+staticfiles/
+media/
+
+# --- Node / frontend --------------------------------------------------------
+node_modules/
+dist/
+.vite/
+*.local
+
+# --- Local artifacts --------------------------------------------------------
+# Local LiveKit server binary + generated dev config (contains the API secret).
+.livekit/
+# Archive of the previous system: it embeds its own .env with live credentials.
+podium-lms-package.zip
+
+# --- OS / editors -----------------------------------------------------------
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.swp
