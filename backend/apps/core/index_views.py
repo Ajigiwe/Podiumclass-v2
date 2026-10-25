@@ -51,7 +51,7 @@ class ApiV1IndexView(View):
                 },
                 "classrooms": {
                     "base": "/api/v1/classrooms/",
-                    "description": "Sessions, materials, recordings, and LiveKit join tokens.",
+                    "description": "Sessions, materials, chat, and LiveKit join tokens.",
                 },
                 "attendance": {
                     "base": "/api/v1/attendance/",

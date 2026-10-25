@@ -1299,10 +1299,63 @@
                 {{ courseMaterials.length }} Shared Resources
               </p>
             </div>
-            <button @click="showMaterialsModal = false" class="p-2 text-slate-400 hover:text-white bg-white/5 rounded-xl transition-all cursor-pointer">
-              <i class="fas fa-times"></i>
-            </button>
+            <div class="flex items-center gap-2">
+              <button
+                v-if="isLecturer"
+                @click="showMaterialForm = !showMaterialForm; materialError = null"
+                class="p-2 text-slate-400 hover:text-indigo-400 bg-white/5 rounded-xl transition-all cursor-pointer"
+                title="Share a resource"
+              >
+                <i class="fas fa-plus"></i>
+              </button>
+              <button @click="showMaterialsModal = false" class="p-2 text-slate-400 hover:text-white bg-white/5 rounded-xl transition-all cursor-pointer">
+                <i class="fas fa-times"></i>
+              </button>
+            </div>
           </div>
+
+          <!-- Host: share a link with the class -->
+          <form
+            v-if="showMaterialForm"
+            class="px-6 py-4 border-b border-white/5 bg-white/[0.02] space-y-2"
+            @submit.prevent="shareMaterial"
+          >
+            <input
+              v-model="materialDraft.title"
+              class="w-full bg-white/5 border border-white/10 rounded-xl px-3 py-2 text-xs text-white placeholder-slate-500 outline-none focus:border-indigo-500 transition-all"
+              placeholder="Title (e.g. Week 5 Slides)"
+              maxlength="255"
+            />
+            <input
+              v-model="materialDraft.url"
+              type="url"
+              class="w-full bg-white/5 border border-white/10 rounded-xl px-3 py-2 text-xs text-white placeholder-slate-500 outline-none focus:border-indigo-500 transition-all"
+              placeholder="https://..."
+            />
+            <div class="flex items-center gap-2">
+              <select
+                v-model="materialDraft.type"
+                class="bg-white/5 border border-white/10 rounded-xl px-3 py-2 text-xs text-white outline-none focus:border-indigo-500 transition-all cursor-pointer"
+              >
+                <option value="link">Link</option>
+                <option value="pdf">PDF</option>
+                <option value="slides">Slides</option>
+                <option value="video">Video</option>
+                <option value="doc">Document</option>
+              </select>
+              <button
+                type="submit"
+                :disabled="isSharingMaterial"
+                class="ml-auto px-4 py-2 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-60 text-white rounded-xl text-xs font-bold transition-all cursor-pointer"
+              >
+                {{ isSharingMaterial ? 'Sharing...' : 'Share' }}
+              </button>
+            </div>
+          </form>
+
+          <p v-if="materialError" class="px-6 pt-3 text-[11px] font-bold text-red-400">
+            {{ materialError }}
+          </p>
 
           <div class="p-6 overflow-y-auto space-y-3">
             <div
@@ -1322,11 +1375,26 @@
               <a
                 :href="mat.url"
                 target="_blank"
+                rel="noopener noreferrer"
                 class="ml-3 px-3 py-1.5 bg-white/10 hover:bg-indigo-600 text-slate-200 hover:text-white rounded-lg text-xs font-bold transition-all"
               >
                 Open
               </a>
+              <button
+                v-if="isLecturer"
+                @click="removeMaterial(mat.id)"
+                class="ml-2 p-1.5 text-slate-500 hover:text-red-400 bg-white/5 rounded-lg transition-all cursor-pointer"
+                title="Remove for everyone"
+              >
+                <i class="fas fa-trash text-[10px]"></i>
+              </button>
             </div>
+            <p
+              v-if="!courseMaterials.length"
+              class="text-[11px] text-slate-500 text-center py-8 uppercase tracking-widest font-bold"
+            >
+              No resources shared yet
+            </p>
           </div>
         </div>
       </div>
@@ -1877,23 +1945,70 @@ watch(
   }
 );
 
-// Course materials are fetched from the backend; empty until a real
-// materials endpoint returns data (no more hardcoded dummy resources).
+// Course materials are stored per session (apps/storage) and shared by the host.
+// The renderer wraps a collection as { documents: [...] }, so this has to be
+// read with the collection helper -- getDocument() returns the envelope itself
+// and the list would stay empty forever.
 const courseMaterials = ref<any[]>([]);
+const showMaterialForm = ref(false);
+const isSharingMaterial = ref(false);
+const materialError = ref<string | null>(null);
+const materialDraft = ref({ title: '', url: '', type: 'link' });
 
 async function loadMaterials() {
   try {
-    const res = await api.getDocument<any>(`/api/v1/classrooms/sessions/${sessionId}/materials/`);
-    if (Array.isArray(res)) {
-      courseMaterials.value = res;
-    } else if (Array.isArray(res?.results)) {
-      courseMaterials.value = res.results;
-    } else {
-      courseMaterials.value = [];
-    }
+    const res: any = await api.getDocuments<any>(
+      `/api/v1/classrooms/sessions/${sessionId}/materials/`
+    );
+    courseMaterials.value = Array.isArray(res) ? res : res?.documents ?? [];
   } catch {
-    // Endpoint not available yet — keep list empty rather than fake it.
+    // No access to this session's materials -- show an empty list, never a
+    // fabricated one.
     courseMaterials.value = [];
+  }
+}
+
+// The list is loaded on mount, but a classmate may share something minutes
+// later: re-fetch every time the modal opens so nobody stares at a stale list.
+watch(showMaterialsModal, (open) => {
+  if (open) void loadMaterials();
+});
+
+async function shareMaterial() {
+  materialError.value = null;
+  const title = materialDraft.value.title.trim();
+  const url = materialDraft.value.url.trim();
+  if (!title || !url) {
+    materialError.value = 'Add a title and a link.';
+    return;
+  }
+  isSharingMaterial.value = true;
+  try {
+    await api.postDocument(`/api/v1/classrooms/sessions/${sessionId}/materials/`, {
+      title,
+      url,
+      type: materialDraft.value.type,
+    });
+    materialDraft.value = { title: '', url: '', type: 'link' };
+    showMaterialForm.value = false;
+    await loadMaterials();
+  } catch (err: any) {
+    materialError.value = err?.message || 'Could not share that resource.';
+  } finally {
+    isSharingMaterial.value = false;
+  }
+}
+
+async function removeMaterial(materialId: string) {
+  materialError.value = null;
+  if (!window.confirm('Remove this resource for everyone in the class?')) return;
+  try {
+    await api.deleteDocument(
+      `/api/v1/classrooms/sessions/${sessionId}/materials/${materialId}/`
+    );
+    courseMaterials.value = courseMaterials.value.filter((m) => m.id !== materialId);
+  } catch (err: any) {
+    materialError.value = err?.message || 'Could not remove that resource.';
   }
 }
 

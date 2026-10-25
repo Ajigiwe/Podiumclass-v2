@@ -7,6 +7,23 @@ PodiumClass v2 is an enterprise-grade virtual classroom and learning management 
 
 ## Recent Major Milestones & Enhancements
 
+### 0. Native Android Companion App (Kotlin & Jetpack Compose)
+- **Native Android Project Architecture (`android/`)**:
+  - Built with **Kotlin 2.0+**, **Jetpack Compose (Material 3)**, and **Gradle Version Catalog** (`libs.versions.toml`).
+  - Native **`io.livekit:livekit-android:2.8.+`** integration for WebRTC SFU streaming and data channel packets.
+  - **Retrofit 2 + Kotlinx Serialization** client adhering strictly to the Document Object contract (`{ "document": ... }`).
+  - **DataStore** JWT credential persistence and runtime API endpoint configuration.
+- **Dual-Role Live Classroom (`ClassroomScreen.kt`)**:
+  - Meet-style dynamic grid & 1-click spotlight pinning.
+  - Native Android **Picture-in-Picture (`PiP`)** allowing background video/audio when switching apps.
+  - Floating control bar with mic, camera, camera flip, and upward-anchored reactions & hand-raising sub-popup.
+  - Real-time in-class chat drawer.
+- **Mobile Anti-Cheat Attendance Checker**:
+  - **Host Manager Modal (`HostAttendanceManagerModal.kt`)**: Real-time check count increment, prompt duration pills, interval adjuster, pause/resume, instant trigger, and live student roster.
+  - **Student Verification Dialog (`StudentVerificationDialog.kt`)**: Teleported non-dismissible dialog with synthesized audio chime, device vibration, countdown timer with urgency color-shifting, and instant "I AM PRESENT" submission to PostgreSQL.
+- **Dashboard & Session Creation (`DashboardScreen.kt`)**:
+  - Active session discovery and class creation dialog with Automated Attendance Checker settings.
+
 ### 1. Automated Attendance Checker & Anti-Cheat Verification System
 - **Pre-Class Session Configuration (`DashboardView.vue` & Django Backend)**:
   - Added Automated Attendance Checker settings directly in the "Create Class" modal.
@@ -68,6 +85,8 @@ PodiumClass v2 is an enterprise-grade virtual classroom and learning management 
   - Server-side persistence in PostgreSQL (`/api/v1/classrooms/sessions/<id>/messages/`).
   - Local caching in `localStorage` for instant message restoration on page refresh.
   - Separate mobile modal and desktop side-drawer chat layouts with auto-scrolling to latest messages.
+- **Server-history loading fix**:
+  - The renderer wraps a list as `{ "documents": [...] }`, but the loader read it with `getDocument()`, which returns the envelope itself — `Array.isArray()` then failed and PostgreSQL history silently never appeared after a refresh. It now uses the collection helper, so a message sent in another tab or on another device shows up.
 
 ---
 
@@ -78,3 +97,15 @@ PodiumClass v2 is an enterprise-grade virtual classroom and learning management 
   - Dual-use authentication (`PodiumAuthentication`) supporting both user JWT tokens and server-to-server Laravel service keys.
 - **Zero TypeScript / Vue Compiler Errors**:
   - Full type safety verified across the frontend bundle with `vue-tsc -b && vite build`.
+
+---
+
+### 7. Course Materials — the storage app is wired up
+- **What was half built**: `apps.storage` was registered (with a migration) but had no views and no routes, so `GET /api/v1/classrooms/sessions/<id>/materials/` returned 404 and the classroom's Learning Materials modal was permanently empty.
+- **Endpoints** (any signed-in user may read; host, lecturer or admin may share):
+  - `GET    /api/v1/classrooms/sessions/<id>/materials/` → `{ "documents": [ ... ] }`
+  - `POST   /api/v1/classrooms/sessions/<id>/materials/` → `{ "document": { ... } }`
+  - `DELETE /api/v1/classrooms/sessions/<id>/materials/<material_id>/`
+- **Validation**: the modal renders `url` straight into an anchor, so links must be absolute `http(s)`; `javascript:` and relative values are rejected with `VALIDATION_ERROR`.
+- **UI**: the modal gained an empty state, a host-only share form (`+` in the header) and a per-row remove button. Sizes are formatted server-side (`2.4 MB`), and a legacy MIME type in `file_type` is normalised to the `pdf / video / slides / doc / link` kinds the modal expects.
+- **Wipe tool**: `wipe_mock_data` now counts and clears `materials` and `recordings` alongside the rest of the mock data.

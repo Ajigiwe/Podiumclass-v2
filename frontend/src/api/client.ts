@@ -119,4 +119,15 @@ export const api = {
     }
     return res.data as unknown as T;
   },
+
+  /**
+   * Delete unwrapped from { document: T } (the backend answers { deleted: true }).
+   */
+  async deleteDocument<T = any>(url: string): Promise<T> {
+    const res = await apiClient.delete<DocumentResponse<T>>(url);
+    if (res.data && 'document' in res.data) {
+      return res.data.document;
+    }
+    return res.data as unknown as T;
+  },
 };

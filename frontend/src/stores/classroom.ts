@@ -829,9 +829,13 @@ export const useClassroomStore = defineStore('classroom', () => {
 
     // 2. Fetch full server history from PostgreSQL
     try {
-      const serverMsgs = await api.getDocument<any[]>(
+      // The renderer wraps a list as { documents: [...] }. Reading it with
+      // getDocument() hands back that envelope, Array.isArray() then fails and
+      // the history silently never loads after a refresh.
+      const res: any = await api.getDocuments<any>(
         `/api/v1/classrooms/sessions/${sessionId}/messages/`
       );
+      const serverMsgs: any[] = Array.isArray(res) ? res : res?.documents ?? [];
       if (Array.isArray(serverMsgs)) {
         const mapped: ChatMsg[] = serverMsgs.map((m: any) => ({
           id: m.id,

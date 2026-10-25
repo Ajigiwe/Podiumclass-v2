@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="black">#0A0A0A</color>
+    <color name="dark_surface">#121217</color>
+    <color name="indigo_primary">#6366F1</color>
+    <color name="emerald_verified">#10B981</color>
+    <color name="amber_warning">#F59E0B</color>
+    <color name="red_urgency">#EF4444</color>
+    <color name="white">#FFFFFF</color>
+</resources>

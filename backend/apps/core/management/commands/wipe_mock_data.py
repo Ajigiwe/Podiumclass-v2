@@ -22,6 +22,7 @@ from apps.attendance.models import (
 )
 from apps.billing.models import Transaction
 from apps.core.models import SystemSetting
+from apps.storage.models import Recording, SessionMaterial
 
 
 class Command(BaseCommand):
@@ -63,6 +64,8 @@ class Command(BaseCommand):
             "participant_permissions": ParticipantPermission.objects.count(),
             "permission_requests": PermissionRequest.objects.count(),
             "chat_messages": ChatMessage.objects.count(),
+            "materials": SessionMaterial.objects.count(),
+            "recordings": Recording.objects.count(),
             "users_deleted": users_delete,
             "users_kept": users_keep,
         }
@@ -94,6 +97,11 @@ class Command(BaseCommand):
             Participant.objects.all().delete()
             ChatMessage.objects.all().delete()
 
+            # 2b. Session-scoped storage objects (CASCADE on session, but
+            #     deleted explicitly so the counts above stay accurate).
+            Recording.objects.all().delete()
+            SessionMaterial.objects.all().delete()
+
             # 3. Sessions (host/lecturer FK is RESTRICT -> gone once users go,
             #    but delete first so the cascade is explicit).
             Session.objects.all().delete()
@@ -109,6 +117,8 @@ class Command(BaseCommand):
         for u in User.objects.all():
             self.stdout.write(f"      - {u.email} ({u.role})")
         self.stdout.write(f"  sessions         {Session.objects.count()}")
+        self.stdout.write(f"  materials        {SessionMaterial.objects.count()}")
+        self.stdout.write(f"  recordings       {Recording.objects.count()}")
         self.stdout.write(f"  attendance       {Attendance.objects.count()}")
         self.stdout.write(f"  transactions     {Transaction.objects.count()}")
         self.stdout.write(f"  system_settings  {SystemSetting.objects.count()} (kept)")
