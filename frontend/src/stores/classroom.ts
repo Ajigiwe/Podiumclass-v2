@@ -45,10 +45,37 @@ export interface ParticipantTile {
   isMicOn: boolean;
   isHandRaised: boolean;
 }
+export type MediaKind = 'mic' | 'camera' | 'screen';
+export type PermissionMode = 'free' | 'approval';
+
+export interface PendingPermissionRequest {
+  id: string;
+  participantId: string;
+  participantName: string;
+  requestType: MediaKind;
+  status: 'pending' | 'approved' | 'rejected';
+}
+
 interface DataMessage {
-  type: 'chat' | 'reaction' | 'verification' | 'hand' | 'mute_all';
+  type:
+    | 'chat'
+    | 'reaction'
+    | 'verification'
+    | 'hand'
+    | 'moderation'
+    | 'permission_request'
+    | 'permission_response'
+    | 'cohost';
   [key: string]: any;
 }
+
+const MEDIA_LABELS: Record<MediaKind, string> = {
+  mic: 'microphone',
+  camera: 'camera',
+  screen: 'screen share',
+};
+
+const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
 
 const nowTime = () =>
   new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
@@ -83,7 +110,56 @@ export const useClassroomStore = defineStore('classroom', () => {
   const incomingVerification = ref<any>(null);
   const raisedHands = ref<{ identity: string; name: string; at: number }[]>([]);
   const isHandRaised = ref(false);
-  const isMutedByHost = ref(false);
+
+  // --- moderation -------------------------------------------------------
+  // The Django session row is the source of truth: it is read once on join and
+  // written whenever the host changes something, so a refresh (either side)
+  // cannot silently unlock a room. The data channel only carries the live
+  // updates, so nobody waits for a reload to see them.
+  const isModerator = ref(false);
+  const isMutedAll = ref(false);
+  const autoApproveMic = ref(false);
+  const permissionPolicy = ref<Record<MediaKind, PermissionMode>>({
+    mic: 'free',
+    camera: 'free',
+    screen: 'free',
+  });
+  // What *this* participant has been personally cleared to use.
+  const myPermissions = ref<Record<MediaKind, boolean>>({
+    mic: false,
+    camera: false,
+    screen: false,
+  });
+  // Requests this participant has already sent and is waiting on.
+  const requestedKinds = ref<Record<MediaKind, boolean>>({
+    mic: false,
+    camera: false,
+    screen: false,
+  });
+  // Host-side inbox of other people's requests.
+  const pendingRequests = ref<PendingPermissionRequest[]>([]);
+  // Co-hosts: `coHostIds` drives the CO-HOST badge on everyone's roster, and
+  // `isCohost` is *this* client's status -- answered by the server at join
+  // (GET .../permissions/) and re-read whenever a cohost packet names us. A
+  // browser must never be able to promote itself by editing its own state.
+  const isCohost = ref(false);
+  const coHostIds = ref<string[]>([]);
+  // The role we joined with, before any co-host promotion. Kept non-reactive:
+  // it is a fact about the join, not something the UI displays or changes.
+  let joinRole: 'student' | 'lecturer' = 'student';
+
+  /**
+   * Apply one co-host status to this client's idea of who runs the room.
+   *
+   * Moderator-ness is derived, never stored: host/lecturer by join role, plus
+   * an active co-host appointment. Losing the appointment therefore takes the
+   * panel and the inbox away with it.
+   */
+  function applyCohostFlag(active: boolean) {
+    isCohost.value = active;
+    isModerator.value = joinRole === 'lecturer' || active;
+    if (!isModerator.value) pendingRequests.value = [];
+  }
 
   /**
    * DOM registry: identity -> <video> element.
@@ -336,6 +412,58 @@ export const useClassroomStore = defineStore('classroom', () => {
     }, 2000);
   }
 
+  /** A line in the chat stream that comes from the system, not a person. */
+  function pushSystemMessage(message: string) {
+    chatMessages.value.push({
+      id: `sys_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+      sender: 'Podium',
+      message,
+      role: 'system',
+      time: nowTime(),
+    });
+  }
+
+  /** Merge a moderation snapshot (REST read or data-channel push). */
+  function applyModerationState(state: any) {
+    if (typeof state?.isMutedAll === 'boolean') isMutedAll.value = state.isMutedAll;
+    if (typeof state?.autoApproveMic === 'boolean') autoApproveMic.value = state.autoApproveMic;
+    if (state?.permissions && typeof state.permissions === 'object') {
+      permissionPolicy.value = { ...permissionPolicy.value, ...state.permissions };
+    }
+  }
+
+  /**
+   * May this participant use one of their own devices right now?
+   *
+   * The moderator is never locked out, a personal approval always wins, and
+   * Mute All holds the microphone shut for everyone who has not been cleared.
+   */
+  function canUse(kind: MediaKind): boolean {
+    if (isModerator.value) return true;
+    if (myPermissions.value[kind]) return true;
+    if (kind === 'mic' && isMutedAll.value) return false;
+    return permissionPolicy.value[kind] === 'free';
+  }
+
+  /** Media that is closed to us right now, for the banner and the button titles. */
+  function lockedKinds(): MediaKind[] {
+    return (Object.keys(MEDIA_LABELS) as MediaKind[]).filter((k) => !canUse(k));
+  }
+
+  /** Cut a device off the moment the room stops allowing it. */
+  function enforceMicLock() {
+    if (isMicEnabled.value && !canUse('mic')) void toggleMic();
+    if (isCameraEnabled.value && !canUse('camera')) void toggleCamera();
+    if (isScreenSharing.value && !canUse('screen')) void toggleScreenShare();
+  }
+
+  /** Turn a device on (used when the host says yes). */
+  async function enableKind(kind: MediaKind) {
+    if (kind === 'mic' && !isMicEnabled.value) await toggleMic();
+    if (kind === 'camera' && !isCameraEnabled.value) await toggleCamera();
+    if (kind === 'screen' && !isScreenSharing.value) await toggleScreenShare();
+  }
+
   async function publish(payload: DataMessage, topic: string) {
     const r = room.value;
     if (!r) return;
@@ -403,21 +531,50 @@ export const useClassroomStore = defineStore('classroom', () => {
         );
         break;
       }
-      case 'mute_all': {
-        isMutedByHost.value = !!msg.muted;
-        // Enforce on the receiving student's mic.
-        if (msg.muted && isMicEnabled.value) {
-          void toggleMic();
+      case 'moderation': {
+        const wasMuted = isMutedAll.value;
+        applyModerationState(msg);
+        // Grants are revoked server-side by Mute All: re-read ours so a stale
+        // "I may speak" flag cannot outlive the lock.
+        void loadOwnPermissions();
+        if (isMutedAll.value !== wasMuted) {
+          pushSystemMessage(
+            isMutedAll.value
+              ? 'The host muted all microphones.'
+              : 'The host unmuted microphones.'
+          );
         }
-        chatMessages.value.push({
-          id: `sys_${Date.now()}`,
-          sender: 'Podium',
-          message: msg.muted
-            ? 'The host muted all microphones.'
-            : 'The host unmuted microphones.',
-          role: 'system',
-          time: nowTime(),
-        });
+        enforceMicLock();
+        break;
+      }
+      case 'permission_request':
+        // Only the host acts on this, and it refetches the inbox instead of
+        // trusting the payload, so the buttons always match the database.
+        if (isModerator.value) void loadPendingRequests();
+        break;
+      case 'cohost': {
+        const myIdentity = room.value?.localParticipant.identity;
+        // Badges come from the roster endpoint, and our own moderator status
+        // is re-read from the server rather than believed from this packet --
+        // anyone can publish on this topic, so it is a hint to look, never a
+        // grant of authority.
+        void loadCoHosts();
+        if (msg.userId === myIdentity) void loadOwnPermissions();
+        break;
+      }
+      case 'permission_response': {
+        const myIdentity = room.value?.localParticipant.identity;
+        if (!msg.target || msg.target !== myIdentity) break;
+        const kind = msg.requestType as MediaKind;
+        if (!MEDIA_LABELS[kind]) break;
+        requestedKinds.value = { ...requestedKinds.value, [kind]: false };
+        if (msg.granted) {
+          myPermissions.value = { ...myPermissions.value, [kind]: true };
+          pushSystemMessage(`The host allowed your ${MEDIA_LABELS[kind]}.`);
+          void enableKind(kind);
+        } else {
+          pushSystemMessage(`The host declined your ${MEDIA_LABELS[kind]} request.`);
+        }
         break;
       }
       default:
@@ -446,10 +603,25 @@ export const useClassroomStore = defineStore('classroom', () => {
       .on(RoomEvent.Reconnecting, () => {
         connectionState.value = ConnectionState.Reconnecting;
       })
+      .on(RoomEvent.Reconnected, () => {
+        // LiveKit data packets are fire-and-forget: anything published while
+        // this peer was down is gone for good, and no ParticipantConnected
+        // fires because our identity never changed. The session row is the
+        // source of truth, so re-read it instead of trusting the stale state
+        // we went into the drop with.
+        void resyncModeration();
+      })
       .on(RoomEvent.ConnectionStateChanged, (state: ConnectionState) => {
         connectionState.value = state;
       })
-      .on(RoomEvent.ParticipantConnected, () => updateParticipants())
+      .on(RoomEvent.ParticipantConnected, () => {
+        updateParticipants();
+        // A late joiner bootstraps from the session row, but a change can land
+        // between their fetch and their join: republish so nobody is left in a
+        // room that is out of date. Re-read first -- broadcasting our own
+        // cache would let a stale snapshot overwrite what they just fetched.
+        if (isModerator.value) void resyncModeration().then(() => publishModeration());
+      })
       .on(RoomEvent.ParticipantDisconnected, () => updateParticipants())
       .on(RoomEvent.TrackSubscribed, () => updateParticipants())
       .on(RoomEvent.TrackUnsubscribed, () => updateParticipants())
@@ -477,6 +649,12 @@ export const useClassroomStore = defineStore('classroom', () => {
     errorMessage.value = null;
     connectionState.value = 'idle';
     activeSessionId.value = sessionId;
+    // The moderator is exempt from every lock; everyone else starts closed and
+    // is opened up by initClassroom() (room policy) and loadOwnPermissions()
+    // (their own approvals). joinRole records how we arrived so a later
+    // co-host promotion can be revoked without losing sight of a real host.
+    joinRole = role;
+    isModerator.value = role === 'lecturer';
     void loadChatHistory(sessionId);
 
     try {
@@ -522,6 +700,11 @@ export const useClassroomStore = defineStore('classroom', () => {
 
       isConnected.value = true;
       syncRoster(newRoom, participantName, role);
+      // Our own approvals (which also settle whether we run the room), the
+      // host's inbox of other people's asks, and the co-host badges.
+      void loadOwnPermissions();
+      if (isModerator.value) void loadPendingRequests();
+      void loadCoHosts();
       return newRoom;
     } catch (e: any) {
       console.error('Classroom connection failed:', e);
@@ -929,9 +1112,252 @@ export const useClassroomStore = defineStore('classroom', () => {
     );
   }
 
-  /** Lecturer: mute/unmute everyone (broadcasts; receivers enforce locally). */
+  /**
+   * Persist a moderation change, then push it to everyone in the room.
+   *
+   * The write comes first: a PATCH that fails must not leave the host's button
+   * advertising a lock the database never heard about.
+   */
+  async function persistModeration(patch: Record<string, unknown>): Promise<boolean> {
+    const sid = activeSessionId.value;
+    if (!sid) return false;
+    try {
+      const doc = await api.patchDocument<any>(
+        `/api/v1/classrooms/sessions/${sid}/`,
+        patch
+      );
+      applyModerationState(doc);
+    } catch (e) {
+      console.warn('Could not save moderation change:', e);
+      pushSystemMessage('That moderation change could not be saved.');
+      return false;
+    }
+    // The row is what makes this durable, so it has already succeeded. A
+    // broadcast that fails (peer briefly offline, LiveKit restarting) only
+    // means the others learn about it on their next read -- join, reconnect or
+    // the following change -- and must not be reported to the host as a
+    // failure of something that was in fact saved.
+    try {
+      await publishModeration();
+    } catch (e) {
+      console.warn('Moderation change saved but not announced:', e);
+    }
+    return true;
+  }
+
+  async function publishModeration() {
+    await publish(
+      {
+        type: 'moderation',
+        isMutedAll: isMutedAll.value,
+        autoApproveMic: autoApproveMic.value,
+        permissions: { ...permissionPolicy.value },
+      },
+      'moderation'
+    );
+  }
+
+  /** Lecturer: mute (and lock) everyone, or release them again. */
   async function setMuteAll(muted: boolean) {
-    await publish({ type: 'mute_all', muted }, 'moderation');
+    const ok = await persistModeration({ isMutedAll: muted });
+    if (!ok) return;
+    if (muted) {
+      // Mute All revokes standing mic approvals server-side too, so mirror it
+      // here rather than waiting for the next round trip.
+      myPermissions.value = { ...myPermissions.value, mic: false };
+      enforceMicLock();
+    }
+  }
+
+  /** Lecturer: let microphone asks answer themselves (Smart Mic). */
+  async function setAutoApproveMic(enabled: boolean) {
+    await persistModeration({ autoApproveMic: enabled });
+  }
+
+  /** Lecturer: put one medium behind host approval -- or open it again. */
+  async function setPermissionPolicy(kind: MediaKind, mode: PermissionMode) {
+    await persistModeration({ permissions: { [kind]: mode } });
+  }
+
+  /** Read this participant's own standing approvals. */
+  async function loadOwnPermissions() {
+    const sid = activeSessionId.value;
+    if (!sid) return;
+    try {
+      const doc = await api.getDocument<{
+        mic: boolean;
+        camera: boolean;
+        screen: boolean;
+        cohost?: boolean;
+      }>(`/api/v1/classrooms/sessions/${sid}/permissions/`);
+      myPermissions.value = { mic: !!doc.mic, camera: !!doc.camera, screen: !!doc.screen };
+      // The same round trip settles whether we run the room, so a promotion
+      // lands (and a demotion takes the panel away) without depending on a
+      // data packet that may have been dropped on the way.
+      const wasModerator = isModerator.value;
+      applyCohostFlag(!!doc.cohost);
+      if (!wasModerator && isModerator.value) void loadPendingRequests();
+      enforceMicLock();
+    } catch (e) {
+      console.warn('Could not load permissions:', e);
+    }
+  }
+
+  /**
+   * Re-read moderation state from the session row after a reconnect.
+   *
+   * The data channel is a live hint layered on top of a durable record; a
+   * packet missed during the drop is not resent. Rather than let a peer keep
+   * whatever it believed going into the outage (a lock that has since been
+   * released, or a lock it never heard about), take both the room's state and
+   * our own grants from the API again.
+   */
+  async function resyncModeration() {
+    const sid = activeSessionId.value;
+    if (!sid) return;
+    try {
+      const doc = await api.getDocument<unknown>(`/api/v1/classrooms/sessions/${sid}/`);
+      applyModerationState(doc);
+    } catch (e) {
+      console.warn('Could not re-read moderation state after reconnect:', e);
+    }
+    await loadOwnPermissions();
+    if (isModerator.value) void loadPendingRequests();
+    // Roster badges are REST state too: a co-host appointed (or removed)
+    // during the outage must not stay wrong after the reconnect.
+    void loadCoHosts();
+  }
+
+  /** Read the host's inbox of pending requests. */
+  async function loadPendingRequests() {
+    const sid = activeSessionId.value;
+    if (!sid || !isModerator.value) return;
+    try {
+      const res = await api.getDocuments<PendingPermissionRequest>(
+        `/api/v1/classrooms/sessions/${sid}/permissions/requests/`
+      );
+      pendingRequests.value = res.documents ?? [];
+    } catch (e) {
+      console.warn('Could not load permission requests:', e);
+    }
+  }
+
+  /** Everyone this room's host has handed the controls to (roster badges). */
+  async function loadCoHosts() {
+    const sid = activeSessionId.value;
+    if (!sid) return;
+    try {
+      const res = await api.getDocuments<{ userId: string }>(
+        `/api/v1/classrooms/sessions/${sid}/cohosts/`
+      );
+      coHostIds.value = (res.documents ?? []).map((d) => d.userId);
+    } catch (e) {
+      console.warn('Could not load co-hosts:', e);
+    }
+  }
+
+  /**
+   * Host: hand one participant the room's controls.
+   *
+   * The appointment is written first and only then announced, so a broadcast
+   * that fails leaves a slightly stale badge rather than a control panel that
+   * claims powers the server never granted. The promoted client re-reads its
+   * own status instead of taking our word for it.
+   */
+  async function addCohost(userId: string): Promise<boolean> {
+    const sid = activeSessionId.value;
+    if (!sid) return false;
+    try {
+      await api.postDocument(`/api/v1/classrooms/sessions/${sid}/cohosts/`, { userId });
+    } catch (e) {
+      console.warn('Could not appoint co-host:', e);
+      pushSystemMessage('That co-host appointment could not be saved.');
+      return false;
+    }
+    await loadCoHosts();
+    await publish({ type: 'cohost', userId, active: true }, 'moderation');
+    return true;
+  }
+
+  /** Host: take the controls back. */
+  async function removeCohost(userId: string): Promise<boolean> {
+    const sid = activeSessionId.value;
+    if (!sid) return false;
+    try {
+      await api.deleteDocument(`/api/v1/classrooms/sessions/${sid}/cohosts/${userId}/`);
+    } catch (e) {
+      console.warn('Could not remove co-host:', e);
+      pushSystemMessage('That co-host could not be removed.');
+      return false;
+    }
+    await loadCoHosts();
+    await publish({ type: 'cohost', userId, active: false }, 'moderation');
+    return true;
+  }
+
+  /**
+   * Ask the host to use a medium that is closed to us.
+   *
+   * Smart Mic answers microphone asks on the server, so that path resolves to
+   * 'approved' straight away; everything else waits for the host, and the
+   * badge stays up until they reply.
+   */
+  async function requestPermission(kind: MediaKind): Promise<'approved' | 'pending' | 'failed'> {
+    const sid = activeSessionId.value;
+    if (!sid || requestedKinds.value[kind]) return 'pending';
+    requestedKinds.value = { ...requestedKinds.value, [kind]: true };
+    try {
+      const doc = await api.postDocument<{ status: string }>(
+        `/api/v1/classrooms/sessions/${sid}/permissions/requests/`,
+        { requestType: kind }
+      );
+      if (doc.status === 'approved') {
+        myPermissions.value = { ...myPermissions.value, [kind]: true };
+        requestedKinds.value = { ...requestedKinds.value, [kind]: false };
+        pushSystemMessage(`${cap(MEDIA_LABELS[kind])} approved automatically.`);
+        await enableKind(kind);
+        return 'approved';
+      }
+      pushSystemMessage(`Asked the host for the ${MEDIA_LABELS[kind]}.`);
+      await publish({ type: 'permission_request', requestType: kind }, 'moderation');
+      return 'pending';
+    } catch (e) {
+      console.warn('Permission request failed:', e);
+      requestedKinds.value = { ...requestedKinds.value, [kind]: false };
+      pushSystemMessage(`The ${MEDIA_LABELS[kind]} request could not be sent.`);
+      return 'failed';
+    }
+  }
+
+  /** Host: answer somebody's request. */
+  async function reviewPermissionRequest(requestId: string, approve: boolean) {
+    const sid = activeSessionId.value;
+    const req = pendingRequests.value.find((r) => r.id === requestId);
+    if (!sid || !req) return;
+    try {
+      await api.patchDocument(
+        `/api/v1/classrooms/sessions/${sid}/permissions/requests/${requestId}/`,
+        { status: approve ? 'approved' : 'rejected' }
+      );
+      pendingRequests.value = pendingRequests.value.filter((r) => r.id !== requestId);
+      await publish(
+        {
+          type: 'permission_response',
+          target: req.participantId,
+          requestType: req.requestType,
+          granted: approve,
+        },
+        'moderation'
+      );
+      pushSystemMessage(
+        approve
+          ? `Allowed ${req.participantName} to use their ${MEDIA_LABELS[req.requestType]}.`
+          : `Declined ${req.participantName}'s ${MEDIA_LABELS[req.requestType]} request.`
+      );
+    } catch (e) {
+      console.warn('Could not review permission request:', e);
+      pushSystemMessage('That answer could not be saved.');
+    }
   }
 
   /** Lecturer: clear all raised hands. */
@@ -968,7 +1394,16 @@ export const useClassroomStore = defineStore('classroom', () => {
     participants.value = [];
     raisedHands.value = [];
     isHandRaised.value = false;
-    isMutedByHost.value = false;
+    isModerator.value = false;
+    isCohost.value = false;
+    coHostIds.value = [];
+    joinRole = 'student';
+    isMutedAll.value = false;
+    autoApproveMic.value = false;
+    permissionPolicy.value = { mic: 'free', camera: 'free', screen: 'free' };
+    myPermissions.value = { mic: false, camera: false, screen: false };
+    requestedKinds.value = { mic: false, camera: false, screen: false };
+    pendingRequests.value = [];
   }
 
   return {
@@ -993,7 +1428,28 @@ export const useClassroomStore = defineStore('classroom', () => {
     incomingVerification,
     raisedHands,
     isHandRaised,
-    isMutedByHost,
+    // moderation
+    isModerator,
+    isCohost,
+    coHostIds,
+    isMutedAll,
+    autoApproveMic,
+    permissionPolicy,
+    myPermissions,
+    requestedKinds,
+    pendingRequests,
+    canUse,
+    lockedKinds,
+    applyModerationState,
+    loadOwnPermissions,
+    loadPendingRequests,
+    loadCoHosts,
+    addCohost,
+    removeCohost,
+    requestPermission,
+    reviewPermissionRequest,
+    setAutoApproveMic,
+    setPermissionPolicy,
     cameraSource,
     switchCameraSource,
     setVideoElement,

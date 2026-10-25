@@ -1,6 +1,6 @@
 import jwt as pyjwt
 from django.conf import settings
-from django.test import TestCase
+from django.test import TestCase, override_settings
 from rest_framework.test import APIClient
 
 from apps.accounts.auth import issue_token
@@ -209,3 +209,66 @@ class GoogleOnlySignInTests(TestCase):
             User.objects.filter(email="newperson@podium.test").exists(),
             "An unauthenticated request must not create accounts.",
         )
+
+
+class DevLoginGateTests(TestCase):
+    """
+    Credential-less sign-in is a local convenience, not a fallback.
+
+    The admin branch mints a fully privileged JWT for a bare POST, so it has to
+    stay unreachable unless a deployment asks for it by name. DEBUG alone is
+    explicitly NOT enough: a staging box forgotten on DEBUG would otherwise be
+    a one-request admin takeover.
+    """
+
+    url = "/api/v1/accounts/google/"
+
+    def setUp(self):
+        self.client = APIClient()
+
+    @override_settings(DEBUG=True, DEV_LOGIN_ENABLED=False)
+    def test_debug_alone_does_not_enable_dev_login(self):
+        res = self.client.post(self.url, {"dev_login": True, "role": "admin"}, format="json")
+        self.assertEqual(res.status_code, 400)
+        self.assertEqual(res.json()["error"]["code"], "CREDENTIAL_REQUIRED")
+
+    @override_settings(DEBUG=False, DEV_LOGIN_ENABLED=True)
+    def test_production_can_never_enable_dev_login(self):
+        # The switch is set, DEBUG is not: this is the configuration a
+        # deployment ships, and it must refuse regardless.
+        res = self.client.post(self.url, {"dev_login": True, "role": "admin"}, format="json")
+        self.assertEqual(res.status_code, 400)
+        self.assertEqual(res.json()["error"]["code"], "CREDENTIAL_REQUIRED")
+
+    @override_settings(DEBUG=True, DEV_LOGIN_ENABLED=False)
+    def test_switched_off_dev_login_falls_through_to_the_credential_check(self):
+        res = self.client.post(self.url, {"dev_login": True, "role": "student"}, format="json")
+        self.assertEqual(res.status_code, 400)
+        self.assertEqual(res.json()["error"]["code"], "CREDENTIAL_REQUIRED")
+
+    @override_settings(DEBUG=True, DEV_LOGIN_ENABLED=True)
+    def test_enabled_dev_login_signs_in_and_the_token_works(self):
+        res = self.client.post(self.url, {"dev_login": True, "role": "student"}, format="json")
+        self.assertEqual(res.status_code, 200)
+        doc = res.json()["document"]
+        self.assertEqual(doc["user"]["email"], "student@podium.local")
+        self.assertNotEqual(doc["user"]["role"], "admin")
+
+        # A token minted this way must actually authenticate.
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {doc['token']}")
+        me = self.client.get("/api/v1/accounts/me/")
+        self.assertEqual(me.status_code, 200)
+        self.assertEqual(me.json()["document"]["email"], "student@podium.local")
+
+    @override_settings(DEBUG=True, DEV_LOGIN_ENABLED=True)
+    def test_admin_branch_is_the_admin_account(self):
+        res = self.client.post(self.url, {"dev_login": True, "role": "admin"}, format="json")
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(res.json()["document"]["user"]["role"], "admin")
+
+    @override_settings(DEBUG=True, DEV_LOGIN_ENABLED=True)
+    def test_enabling_dev_login_does_not_weaken_the_normal_path(self):
+        # Turning the switch on must not also turn off the credential check.
+        res = self.client.post(self.url, {}, format="json")
+        self.assertEqual(res.status_code, 400)
+        self.assertEqual(res.json()["error"]["code"], "CREDENTIAL_REQUIRED")

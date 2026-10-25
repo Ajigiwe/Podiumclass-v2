@@ -28,6 +28,10 @@ class TokenStorage(private val context: Context) {
         prefs[KEY_USER_ROLE] ?: "student"
     }
 
+    val userIdFlow: Flow<String?> = context.dataStore.data.map { prefs ->
+        prefs[KEY_USER_ID]
+    }
+
     val apiUrlFlow: Flow<String> = context.dataStore.data.map { prefs ->
         // Default to standard local dev loopback on Android emulator (10.0.2.2)
         prefs[KEY_API_URL] ?: "http://10.0.2.2:8000"

@@ -146,7 +146,14 @@ class GoogleAuthView(APIView):
         # (printed on their ID card, and visible in class rosters) or guessing an
         # email address was enough to sign in as them, with no password and no
         # proof of identity.
-        if settings.DEBUG and request.data.get("dev_login"):
+        # Local/mobile convenience login. Both switches are required: DEBUG
+        # alone is too easy to leave on somewhere public, and this branch mints
+        # a fully privileged admin token for a bare POST.
+        if (
+            settings.DEV_LOGIN_ENABLED
+            and settings.DEBUG
+            and request.data.get("dev_login")
+        ):
             dev_role = request.data.get("role", "admin")
             if dev_role == "admin":
                 email = admin_email

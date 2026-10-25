@@ -26,12 +26,21 @@ fun ControlBar(
     isMicOn: Boolean,
     isCameraOn: Boolean,
     isHandRaised: Boolean,
+    isModerator: Boolean = false,
+    canUseMic: Boolean = true,
+    canUseCamera: Boolean = true,
+    isMicRequested: Boolean = false,
+    isCameraRequested: Boolean = false,
+    pendingModerationRequests: Int = 0,
     onToggleMic: () -> Unit,
     onToggleCamera: () -> Unit,
     onFlipCamera: () -> Unit,
     onToggleHand: () -> Unit,
     onSendReaction: (String) -> Unit,
     onToggleChat: () -> Unit,
+    onOpenModeration: () -> Unit = {},
+    onRequestMic: () -> Unit = {},
+    onRequestCamera: () -> Unit = {},
     onLeaveClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -115,36 +124,86 @@ fun ControlBar(
                 .border(1.dp, CardBorder, RoundedCornerShape(24.dp))
                 .padding(horizontal = 12.dp, vertical = 8.dp)
         ) {
-            // Mic Toggle
-            IconButton(
-                onClick = onToggleMic,
-                modifier = Modifier
-                    .size(44.dp)
-                    .clip(CircleShape)
-                    .background(if (isMicOn) IndigoPrimary else Color.White.copy(alpha = 0.08f))
-            ) {
-                Icon(
-                    imageVector = if (isMicOn) Icons.Default.Mic else Icons.Default.MicOff,
-                    contentDescription = "Mic",
-                    tint = if (isMicOn) Color.White else RedUrgent,
-                    modifier = Modifier.size(20.dp)
-                )
+            // Mic Toggle / Request
+            Box {
+                IconButton(
+                    onClick = {
+                        if (canUseMic) {
+                            onToggleMic()
+                        } else {
+                            onRequestMic()
+                        }
+                    },
+                    modifier = Modifier
+                        .size(44.dp)
+                        .clip(CircleShape)
+                        .background(
+                            when {
+                                isMicOn -> IndigoPrimary
+                                !canUseMic && isMicRequested -> AmberWarning.copy(alpha = 0.25f)
+                                !canUseMic -> Color.White.copy(alpha = 0.05f)
+                                else -> Color.White.copy(alpha = 0.08f)
+                            }
+                        )
+                ) {
+                    Icon(
+                        imageVector = when {
+                            isMicOn -> Icons.Default.Mic
+                            !canUseMic && isMicRequested -> Icons.Default.HourglassTop
+                            !canUseMic -> Icons.Default.Lock
+                            else -> Icons.Default.MicOff
+                        },
+                        contentDescription = "Mic",
+                        tint = when {
+                            isMicOn -> Color.White
+                            !canUseMic && isMicRequested -> AmberWarning
+                            !canUseMic -> AmberWarning.copy(alpha = 0.8f)
+                            else -> RedUrgent
+                        },
+                        modifier = Modifier.size(20.dp)
+                    )
+                }
             }
 
-            // Camera Toggle
-            IconButton(
-                onClick = onToggleCamera,
-                modifier = Modifier
-                    .size(44.dp)
-                    .clip(CircleShape)
-                    .background(if (isCameraOn) IndigoPrimary else Color.White.copy(alpha = 0.08f))
-            ) {
-                Icon(
-                    imageVector = if (isCameraOn) Icons.Default.Videocam else Icons.Default.VideocamOff,
-                    contentDescription = "Camera",
-                    tint = if (isCameraOn) Color.White else RedUrgent,
-                    modifier = Modifier.size(20.dp)
-                )
+            // Camera Toggle / Request
+            Box {
+                IconButton(
+                    onClick = {
+                        if (canUseCamera) {
+                            onToggleCamera()
+                        } else {
+                            onRequestCamera()
+                        }
+                    },
+                    modifier = Modifier
+                        .size(44.dp)
+                        .clip(CircleShape)
+                        .background(
+                            when {
+                                isCameraOn -> IndigoPrimary
+                                !canUseCamera && isCameraRequested -> AmberWarning.copy(alpha = 0.25f)
+                                !canUseCamera -> Color.White.copy(alpha = 0.05f)
+                                else -> Color.White.copy(alpha = 0.08f)
+                            }
+                        )
+                ) {
+                    Icon(
+                        imageVector = when {
+                            isCameraOn -> Icons.Default.Videocam
+                            !canUseCamera && isCameraRequested -> Icons.Default.HourglassTop
+                            !canUseCamera -> Icons.Default.Lock
+                            else -> Icons.Default.VideocamOff
+                        },
+                        contentDescription = "Camera",
+                        tint = when {
+                            isCameraOn -> Color.White
+                            !canUseCamera && isCameraRequested -> AmberWarning
+                            !canUseCamera -> AmberWarning.copy(alpha = 0.8f)
+                            else -> RedUrgent
+                        },
+                        modifier = Modifier.size(20.dp)
+                    )
+                }
             }
 
             // Flip Camera
@@ -177,6 +236,54 @@ fun ControlBar(
                     tint = if (isHandRaised) Color.White else TextSecondary,
                     modifier = Modifier.size(20.dp)
                 )
+            }
+
+            // Moderator Controls Button (Host / Co-Host)
+            if (isModerator) {
+                Box {
+                    IconButton(
+                        onClick = onOpenModeration,
+                        modifier = Modifier
+                            .size(44.dp)
+                            .clip(CircleShape)
+                            .background(
+                                if (pendingModerationRequests > 0) AmberWarning.copy(alpha = 0.2f)
+                                else IndigoPrimary.copy(alpha = 0.15f)
+                            )
+                            .border(
+                                1.dp,
+                                if (pendingModerationRequests > 0) AmberWarning.copy(alpha = 0.4f)
+                                else IndigoPrimary.copy(alpha = 0.3f),
+                                CircleShape
+                            )
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Shield,
+                            contentDescription = "Moderation",
+                            tint = if (pendingModerationRequests > 0) AmberWarning else IndigoPrimary,
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
+
+                    if (pendingModerationRequests > 0) {
+                        Box(
+                            modifier = Modifier
+                                .align(Alignment.TopEnd)
+                                .offset(x = 2.dp, y = (-2).dp)
+                                .size(16.dp)
+                                .clip(CircleShape)
+                                .background(AmberWarning),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                text = pendingModerationRequests.toString(),
+                                color = Color.Black,
+                                fontSize = 9.sp,
+                                fontWeight = FontWeight.Black
+                            )
+                        }
+                    }
+                }
             }
 
             // Chat Button

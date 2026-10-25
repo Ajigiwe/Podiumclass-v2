@@ -153,3 +153,27 @@ class MaterialApiTests(TestCase):
         res = self.client.get("/api/v1/classrooms/sessions/ses_missing/materials/")
         self.assertEqual(res.status_code, 404)
         self.assertEqual(res.json()["error"]["code"], "NOT_FOUND")
+
+    def test_a_cohost_shares_and_removes_materials_like_the_host(self):
+        # Full moderation parity: handing someone the room's controls must
+        # include handing them the document tray, or the role is a fake.
+        from apps.classrooms.models import CoHost
+
+        CoHost.objects.create(
+            id="coh_mat", session=self.session, user=self.student,
+            user_name="Kofi", assigned_by=self.lecturer.id,
+        )
+
+        self._auth(self.student)
+        res = self.client.post(
+            self.base,
+            data={"title": "Shared by cohost", "url": "https://example.com/ch",
+                  "type": "link"},
+            format="json",
+        )
+        self.assertEqual(res.status_code, 201)
+        material_id = res.json()["document"]["id"]
+
+        res = self.client.delete(f"{self.base}{material_id}/")
+        self.assertEqual(res.status_code, 200)
+        self.assertFalse(SessionMaterial.objects.filter(id=material_id).exists())

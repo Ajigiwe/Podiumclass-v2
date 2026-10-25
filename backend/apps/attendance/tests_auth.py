@@ -158,3 +158,67 @@ class DualUseAuthenticationTests(TestCase):
         )
         self.assertEqual(res.status_code, 403)
         self.assertEqual(res.json()["error"]["code"], "INVALID_API_KEY")
+
+    # -- co-hosts --------------------------------------------------------
+    #
+    # Session-scoped verification endpoints accept whoever is running *that*
+    # room; the unscoped list of every session stays lecturer/admin only.
+
+    def _make_cohost(self, session=None, user=None):
+        from apps.classrooms.models import CoHost
+
+        CoHost.objects.create(
+            id="coh_auth_test",
+            session=session or self.session,
+            user=user or self.student,
+            user_name="Kofi Mensah",
+            assigned_by=self.lecturer.id,
+        )
+
+    def test_cohost_of_the_session_may_trigger_verification(self):
+        self._make_cohost()
+        res = self.client.post(
+            reverse("attendance-verification-trigger"),
+            {"sessionId": self.session.id},
+            content_type="application/json",
+            **bearer(self.student_token),
+        )
+        self.assertNotEqual(res.status_code, 403, res.content)
+
+    def test_a_plain_student_may_not_trigger_verification(self):
+        res = self.client.post(
+            reverse("attendance-verification-trigger"),
+            {"sessionId": self.session.id},
+            content_type="application/json",
+            **bearer(self.student_token),
+        )
+        self.assertEqual(res.status_code, 403)
+        self.assertEqual(res.json()["error"]["code"], "LECTURER_REQUIRED")
+
+    def test_a_cohost_of_another_session_cannot_trigger_here(self):
+        other = Session.objects.create(
+            id="ses_other_room", title="Other", host=self.lecturer,
+            meeting_code="OTH-201", course="CS101", program="BSc CS",
+            status="active", is_active=True, duration_minutes=60,
+        )
+        self._make_cohost(session=other)
+        res = self.client.post(
+            reverse("attendance-verification-trigger"),
+            {"sessionId": self.session.id},
+            content_type="application/json",
+            **bearer(self.student_token),
+        )
+        self.assertEqual(res.status_code, 403)
+
+    def test_cohost_may_read_the_roster_of_their_session(self):
+        self._make_cohost()
+        res = self.client.get(
+            reverse("attendance-session-detail", kwargs={"session_id": self.session.id}),
+            **bearer(self.student_token),
+        )
+        self.assertEqual(res.status_code, 200, res.content)
+
+    def test_the_unscoped_session_list_stays_lecturer_only_for_a_cohost(self):
+        self._make_cohost()
+        res = self.client.get(reverse("attendance-sessions"), **bearer(self.student_token))
+        self.assertEqual(res.status_code, 403)

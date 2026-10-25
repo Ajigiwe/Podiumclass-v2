@@ -34,6 +34,51 @@ interface PodiumApiService {
     @POST("/api/v1/classrooms/sessions/{id}/token/")
     suspend fun getLiveKitToken(@Path("id") sessionId: String): DocumentResponse<LiveKitTokenDto>
 
+    @POST("/api/v1/classrooms/sessions/{id}/end/")
+    suspend fun endSession(@Path("id") sessionId: String): DocumentResponse<SessionDto>
+
+    // ==================== MODERATION & PERMISSIONS ====================
+    @GET("/api/v1/classrooms/sessions/{id}/permissions/")
+    suspend fun getMyPermissions(@Path("id") sessionId: String): DocumentResponse<PermissionGrantDto>
+
+    @PATCH("/api/v1/classrooms/sessions/{id}/permissions/")
+    suspend fun patchParticipantPermission(
+        @Path("id") sessionId: String,
+        @Body body: Map<String, String>
+    ): DocumentResponse<PermissionGrantDto>
+
+    @GET("/api/v1/classrooms/sessions/{id}/permissions/requests/")
+    suspend fun getPendingPermissionRequests(@Path("id") sessionId: String): DocumentsResponse<PermissionRequestDto>
+
+    @POST("/api/v1/classrooms/sessions/{id}/permissions/requests/")
+    suspend fun requestPermission(
+        @Path("id") sessionId: String,
+        @Body request: PermissionRequestCreate
+    ): DocumentResponse<PermissionRequestDto>
+
+    @PATCH("/api/v1/classrooms/sessions/{id}/permissions/requests/{requestId}/")
+    suspend fun reviewPermissionRequest(
+        @Path("id") sessionId: String,
+        @Path("requestId") requestId: String,
+        @Body request: PermissionReviewRequest
+    ): DocumentResponse<PermissionRequestDto>
+
+    // ==================== CO-HOSTS ====================
+    @GET("/api/v1/classrooms/sessions/{id}/cohosts/")
+    suspend fun getCoHosts(@Path("id") sessionId: String): DocumentsResponse<CoHostDto>
+
+    @POST("/api/v1/classrooms/sessions/{id}/cohosts/")
+    suspend fun appointCoHost(
+        @Path("id") sessionId: String,
+        @Body request: AppointCoHostRequest
+    ): DocumentResponse<CoHostDto>
+
+    @DELETE("/api/v1/classrooms/sessions/{id}/cohosts/{userId}/")
+    suspend fun removeCoHost(
+        @Path("id") sessionId: String,
+        @Path("userId") userId: String
+    ): DocumentResponse<CoHostDto>
+
     // ==================== ATTENDANCE ====================
     @POST("/api/v1/attendance/join/")
     suspend fun registerAttendanceJoin(@Body request: AttendanceJoinRequest): DocumentResponse<Map<String, String>>

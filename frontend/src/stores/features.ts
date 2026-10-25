@@ -14,6 +14,11 @@ export const useFeaturesStore = defineStore('features', () => {
   const flags = ref<Record<string, boolean>>({});
   const loaded = ref(false);
 
+  // Whether the backend will accept a credential-less POST to
+  // /api/v1/accounts/google/. Fails closed: the login page's DEV
+  // quick-access buttons stay hidden until the server says otherwise.
+  const devLogin = ref(false);
+
   /** Resolve a flag; assume-enabled only for unknown keys to avoid blanking the UI. */
   function isEnabled(key: string): boolean {
     if (key in flags.value) return flags.value[key];
@@ -25,13 +30,17 @@ export const useFeaturesStore = defineStore('features', () => {
 
   async function loadFeatures() {
     try {
-      const doc = await api.getDocument<{ features: Record<string, boolean> }>(
-        '/api/v1/core/features/'
-      );
+      const doc = await api.getDocument<{
+        features: Record<string, boolean>;
+        devLogin?: boolean;
+      }>('/api/v1/core/features/');
       flags.value = doc?.features ?? {};
+      devLogin.value = !!doc?.devLogin;
       loaded.value = true;
     } catch (err) {
       // Never block the app on a flag fetch; fail open so nav still renders.
+      // devLogin is deliberately NOT failed open: without it the login page
+      // simply hides the credential-less buttons.
       console.warn('Could not load feature flags; defaulting to enabled', err);
       loaded.value = true;
     }
@@ -45,6 +54,7 @@ export const useFeaturesStore = defineStore('features', () => {
   return {
     flags,
     loaded,
+    devLogin,
     isEnabled,
     walletEnabled,
     liveClassroomEnabled,

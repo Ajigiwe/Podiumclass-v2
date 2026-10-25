@@ -198,7 +198,7 @@
 
             <!-- Lecturer: Automated Attendance Checker Manager -->
             <button
-              v-if="isLecturer"
+              v-if="canModerate"
               @click="showAttendanceManagerModal = true; loadAttendanceRoster();"
               class="h-8 sm:h-9 px-2.5 sm:px-3 text-[9px] sm:text-[10px] font-black uppercase tracking-widest text-emerald-300 bg-emerald-950/60 hover:bg-emerald-900 border border-emerald-500/30 rounded-xl transition-all flex items-center gap-1.5 cursor-pointer shadow-lg shadow-emerald-950/40"
               title="Automated Attendance Checker Manager & Live Settings"
@@ -257,7 +257,7 @@
                     class="w-2 h-2 rounded-full"
                     :class="classroomStore.isMicEnabled ? 'bg-emerald-500 animate-pulse' : 'bg-slate-500'"
                   ></span>
-                  {{ authStore.user?.fullName || 'User' }} ({{ isLecturer ? 'Host' : 'Participant' }})
+                  {{ authStore.user?.fullName || 'User' }} ({{ isLecturer ? 'Host' : classroomStore.isCohost ? 'Co-host' : 'Participant' }})
                 </span>
                 <span
                   v-if="classroomStore.isScreenSharing"
@@ -482,6 +482,10 @@
                         class="px-1.5 py-0.5 rounded text-[8px] font-black uppercase tracking-wider bg-amber-500/90 text-white shrink-0"
                       >Host</span>
                       <span
+                        v-else-if="isCoHostRow(p)"
+                        class="px-1.5 py-0.5 rounded text-[8px] font-black uppercase tracking-wider bg-violet-500/90 text-white shrink-0"
+                      >Co-host</span>
+                      <span
                         v-if="p.isHandRaised"
                         class="text-amber-400 text-xs shrink-0"
                         title="Hand raised"
@@ -586,19 +590,7 @@
           </div>
 
           <!-- Moderator Controls Toolbar -->
-          <div v-if="isLecturer" class="p-3 border-b border-white/[0.08] bg-white/[0.02] flex items-center justify-between gap-2 shrink-0">
-            <button
-              @click="toggleMuteAll"
-              class="px-3 py-1.5 text-[10px] font-bold uppercase tracking-wider bg-white/5 hover:bg-white/10 rounded-lg text-white border border-white/5 transition-all flex items-center gap-1.5 cursor-pointer"
-            >
-              <i class="fas fa-volume-mute text-xs text-red-400"></i>
-              <span>{{ isMutedAll ? 'Unmute All' : 'Mute All' }}</span>
-            </button>
-            <label class="flex items-center gap-2 px-2.5 py-1.5 text-[10px] font-bold uppercase tracking-wider bg-white/5 rounded-lg text-white cursor-pointer">
-              <input type="checkbox" v-model="autoApproveMic" class="rounded" />
-              <span>Smart Mic</span>
-            </label>
-          </div>
+          <RoomModeration v-if="canModerate" />
 
           <div class="flex-1 p-4 overflow-y-auto space-y-2">
             <div
@@ -614,13 +606,22 @@
                   <p class="text-xs font-bold text-slate-200 truncate">
                     {{ p.name }}<span v-if="p.isLocal" class="text-slate-500 font-medium"> (you)</span>
                   </p>
-                  <p class="text-[10px] font-medium uppercase tracking-wider" :class="p.role === 'lecturer' ? 'text-amber-400' : 'text-slate-400'">
-                    {{ p.role === 'lecturer' ? 'Lecturer' : 'Student' }}
+                  <p class="text-[10px] font-medium uppercase tracking-wider" :class="rosterRoleClass(p)">
+                    {{ rosterRoleLabel(p, 'Lecturer') }}
                     <span v-if="p.isHandRaised" class="text-amber-400 ml-1">&#9995; raised</span>
                   </p>
                 </div>
               </div>
               <div class="flex items-center gap-2 shrink-0">
+                <button
+                  v-if="canAppointCohost(p)"
+                  @click="toggleCohost(p)"
+                  class="p-1.5 rounded-lg transition-all cursor-pointer"
+                  :class="isCoHostRow(p) ? 'text-violet-400 hover:bg-violet-500/15' : 'text-slate-500 hover:text-violet-300 hover:bg-white/5'"
+                  :title="isCoHostRow(p) ? 'Remove as co-host' : 'Make co-host'"
+                >
+                  <i class="fas text-[10px]" :class="isCoHostRow(p) ? 'fa-user-minus' : 'fa-user-plus'"></i>
+                </button>
                 <i :class="['fas text-xs', p.isMicOn ? 'fa-microphone text-emerald-400' : 'fa-microphone-slash text-slate-600']"></i>
                 <i v-if="p.isSpeaking" class="fas fa-audio-lines text-emerald-400 text-xs"></i>
               </div>
@@ -873,23 +874,7 @@
           </div>
 
           <!-- Moderator Controls Toolbar -->
-          <div
-            v-if="isLecturer"
-            class="p-3 border-b border-white/[0.08] flex items-center justify-between gap-2 shrink-0"
-            style="background-color: #14151f;"
-          >
-            <button
-              @click="toggleMuteAll"
-              class="px-3 py-1.5 text-[10px] font-bold uppercase tracking-wider bg-white/5 hover:bg-white/10 rounded-lg text-white border border-white/5 transition-all flex items-center gap-1.5 cursor-pointer"
-            >
-              <i class="fas fa-volume-mute text-xs text-red-400"></i>
-              <span>{{ isMutedAll ? 'Unmute All' : 'Mute All' }}</span>
-            </button>
-            <label class="flex items-center gap-2 px-2.5 py-1.5 text-[10px] font-bold uppercase tracking-wider bg-white/5 rounded-lg text-white cursor-pointer">
-              <input type="checkbox" v-model="autoApproveMic" class="rounded" />
-              <span>Smart Mic</span>
-            </label>
-          </div>
+          <RoomModeration v-if="canModerate" />
 
           <!-- Participants List -->
           <div
@@ -911,14 +896,23 @@
                   </p>
                   <p
                     class="text-[10px] font-medium uppercase tracking-wider mt-0.5"
-                    :class="p.role === 'lecturer' || p.role === 'admin' ? 'text-amber-400' : 'text-slate-400'"
+                    :class="rosterRoleClass(p)"
                   >
-                    {{ p.role === 'lecturer' || p.role === 'admin' ? 'Host' : 'Student' }}
+                    {{ rosterRoleLabel(p, 'Host') }}
                     <span v-if="p.isHandRaised" class="text-amber-400 ml-1">&#9995; raised</span>
                   </p>
                 </div>
               </div>
               <div class="flex items-center gap-2.5 shrink-0">
+                <button
+                  v-if="canAppointCohost(p)"
+                  @click="toggleCohost(p)"
+                  class="p-1.5 rounded-lg transition-all cursor-pointer"
+                  :class="isCoHostRow(p) ? 'text-violet-400 hover:bg-violet-500/15' : 'text-slate-500 hover:text-violet-300 hover:bg-white/5'"
+                  :title="isCoHostRow(p) ? 'Remove as co-host' : 'Make co-host'"
+                >
+                  <i class="fas text-[10px]" :class="isCoHostRow(p) ? 'fa-user-minus' : 'fa-user-plus'"></i>
+                </button>
                 <i :class="['fas text-xs', p.isMicOn ? 'fa-microphone text-emerald-400' : 'fa-microphone-slash text-slate-600']"></i>
                 <i v-if="p.isSpeaking" class="fas fa-audio-lines text-emerald-400 text-xs"></i>
               </div>
@@ -1004,7 +998,7 @@
       <!-- ==================== HOST ATTENDANCE CHECKER CONFIGURATION MODAL ==================== -->
       <Teleport to="body">
         <div
-          v-if="showAttendanceManagerModal && isLecturer"
+          v-if="showAttendanceManagerModal && canModerate"
           class="fixed inset-0 z-[1000] flex items-center justify-center p-3 sm:p-4 bg-black/80 backdrop-blur-md animate-fade-in"
           @click.self="showAttendanceManagerModal = false"
         >
@@ -1301,7 +1295,7 @@
             </div>
             <div class="flex items-center gap-2">
               <button
-                v-if="isLecturer"
+                v-if="canModerate"
                 @click="showMaterialForm = !showMaterialForm; materialError = null"
                 class="p-2 text-slate-400 hover:text-indigo-400 bg-white/5 rounded-xl transition-all cursor-pointer"
                 title="Share a resource"
@@ -1381,7 +1375,7 @@
                 Open
               </a>
               <button
-                v-if="isLecturer"
+                v-if="canModerate"
                 @click="removeMaterial(mat.id)"
                 class="ml-2 p-1.5 text-slate-500 hover:text-red-400 bg-white/5 rounded-lg transition-all cursor-pointer"
                 title="Remove for everyone"
@@ -1441,19 +1435,33 @@
         </div>
       </div>
 
+      <!-- What is closed to this participant, and how to get it open -->
+      <div
+        v-if="lockedBanner"
+        class="fixed bottom-[4.75rem] sm:bottom-20 left-1/2 -translate-x-1/2 z-[200] max-w-[92vw] flex items-center gap-2 px-3 py-2 rounded-xl bg-amber-500/15 border border-amber-400/40 text-amber-100 shadow-xl backdrop-blur-sm"
+      >
+        <i class="fas fa-lock text-[11px] text-amber-300 shrink-0"></i>
+        <span class="text-[11px] font-semibold">{{ lockedBanner }}</span>
+      </div>
+
       <!-- Floating Control Bar (Matching CustomControlBar.tsx) -->
       <div class="fixed bottom-3 sm:bottom-4 left-1/2 -translate-x-1/2 z-[200] flex items-center gap-1.5 p-1.5 bg-neutral-900/95 backdrop-blur-sm border border-white/[0.08] rounded-2xl max-w-[98vw] shadow-2xl">
         <!-- Mic Toggle & Device Chevron -->
         <div class="flex items-center">
           <button
-            @click="classroomStore.toggleMic"
+            @click="toggleMicTrack"
             :class="[
-              'h-10 w-10 sm:h-11 sm:w-11 flex items-center justify-center rounded-xl transition-all duration-200 cursor-pointer',
-              classroomStore.isMicEnabled ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-600/20' : 'text-slate-400 hover:bg-white/5'
+              'relative h-10 w-10 sm:h-11 sm:w-11 flex items-center justify-center rounded-xl transition-all duration-200 cursor-pointer',
+              classroomStore.isMicEnabled ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-600/20' : 'text-slate-400 hover:bg-white/5',
+              !classroomStore.canUse('mic') ? 'ring-1 ring-amber-400/50' : ''
             ]"
-            :title="classroomStore.isMicEnabled ? 'Mute Microphone' : 'Unmute Microphone'"
+            :title="micTitle"
           >
             <i :class="['fas', classroomStore.isMicEnabled ? 'fa-microphone text-sm' : 'fa-microphone-slash text-sm text-red-400']"></i>
+            <i
+              v-if="!classroomStore.canUse('mic')"
+              class="fas fa-lock absolute -top-0.5 -right-0.5 text-[8px] text-amber-400 bg-neutral-900 rounded-full p-[2px]"
+            ></i>
           </button>
         </div>
 
@@ -1464,12 +1472,17 @@
           <button
             @click="toggleCameraTrack"
             :class="[
-              'h-10 w-10 sm:h-11 sm:w-11 flex items-center justify-center rounded-xl transition-all duration-200 cursor-pointer',
-              classroomStore.isCameraEnabled ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-600/20' : 'text-slate-400 hover:bg-white/5'
+              'relative h-10 w-10 sm:h-11 sm:w-11 flex items-center justify-center rounded-xl transition-all duration-200 cursor-pointer',
+              classroomStore.isCameraEnabled ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-600/20' : 'text-slate-400 hover:bg-white/5',
+              !classroomStore.canUse('camera') ? 'ring-1 ring-amber-400/50' : ''
             ]"
-            :title="classroomStore.isCameraEnabled ? 'Turn Off Camera' : 'Turn On Camera'"
+            :title="cameraTitle"
           >
             <i :class="['fas', classroomStore.isCameraEnabled ? 'fa-video text-sm' : 'fa-video-slash text-sm text-red-400']"></i>
+            <i
+              v-if="!classroomStore.canUse('camera')"
+              class="fas fa-lock absolute -top-0.5 -right-0.5 text-[8px] text-amber-400 bg-neutral-900 rounded-full p-[2px]"
+            ></i>
           </button>
         </div>
 
@@ -1479,12 +1492,17 @@
         <button
           @click="toggleScreenShareTrack"
           :class="[
-            'h-10 w-10 sm:h-11 sm:w-11 flex items-center justify-center rounded-xl transition-all duration-200 cursor-pointer',
-            classroomStore.isScreenSharing ? 'bg-emerald-600/30 text-emerald-400 ring-1 ring-emerald-500/40' : 'text-slate-400 hover:bg-white/5'
+            'relative h-10 w-10 sm:h-11 sm:w-11 flex items-center justify-center rounded-xl transition-all duration-200 cursor-pointer',
+            classroomStore.isScreenSharing ? 'bg-emerald-600/30 text-emerald-400 ring-1 ring-emerald-500/40' : 'text-slate-400 hover:bg-white/5',
+            !classroomStore.canUse('screen') ? 'ring-1 ring-amber-400/50' : ''
           ]"
-          title="Share Screen"
+          :title="screenTitle"
         >
           <i class="fas fa-desktop text-sm"></i>
+          <i
+            v-if="!classroomStore.canUse('screen')"
+            class="fas fa-lock absolute -top-0.5 -right-0.5 text-[8px] text-amber-400 bg-neutral-900 rounded-full p-[2px]"
+          ></i>
         </button>
 
         <!-- Merged Reactions & Raise Hand (Google Meet style) -->
@@ -1570,9 +1588,10 @@
 <script setup lang="ts">
 import { ref, computed, watch, onMounted, onUnmounted, nextTick } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
-import { useClassroomStore } from '../stores/classroom';
+import { useClassroomStore, type MediaKind } from '../stores/classroom';
 import { useAuthStore } from '../stores/auth';
 import { api } from '../api/client';
+import RoomModeration from '../components/RoomModeration.vue';
 
 const route = useRoute();
 const router = useRouter();
@@ -1596,9 +1615,65 @@ const showMaterialsModal = ref(false);
 const showShareModal = ref(false);
 const showReactions = ref(false);
 
-const isMutedAll = ref(false);
-const autoApproveMic = ref(false);
 const newChatMessage = ref('');
+
+// --- permission-gated device controls -----------------------------------
+// The room's moderation state lives in the store (backed by the session row).
+// These wrappers decide whether a click toggles the device or asks the host.
+function guarded(kind: MediaKind, toggle: () => Promise<void>) {
+  if (!classroomStore.canUse(kind)) {
+    void classroomStore.requestPermission(kind);
+    return;
+  }
+  void toggle();
+}
+
+function toggleMicTrack() {
+  guarded('mic', () => classroomStore.toggleMic());
+}
+
+const deviceTitle = (
+  kind: MediaKind,
+  on: boolean,
+  freeLabel: string,
+  offLabel: string,
+  askLabel: string
+) => {
+  if (classroomStore.requestedKinds[kind]) return 'Waiting for the host...';
+  if (!classroomStore.canUse(kind)) return askLabel;
+  return on ? freeLabel : offLabel;
+};
+
+const micTitle = computed(() =>
+  deviceTitle('mic', classroomStore.isMicEnabled, 'Mute Microphone', 'Unmute Microphone', 'Ask the host to unmute you')
+);
+const cameraTitle = computed(() =>
+  deviceTitle('camera', classroomStore.isCameraEnabled, 'Turn Off Camera', 'Turn On Camera', 'Ask for camera permission')
+);
+const screenTitle = computed(() =>
+  deviceTitle('screen', classroomStore.isScreenSharing, 'Stop sharing', 'Share Screen', 'Ask for screen share permission')
+);
+
+/** Media this participant is locked out of right now. */
+const lockedKinds = computed<MediaKind[]>(() => classroomStore.lockedKinds());
+
+const lockedBanner = computed(() => {
+  const kinds = lockedKinds.value;
+  if (!kinds.length) return '';
+  const names = kinds.map((k) => (k === 'screen' ? 'screen share' : k));
+  const list = names.length > 1 ? `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}` : names[0];
+  const waiting = (Object.keys(classroomStore.requestedKinds) as MediaKind[]).filter(
+    (k) => classroomStore.requestedKinds[k]
+  );
+  if (waiting.length) {
+    const what = waiting.map((k) => (k === 'screen' ? 'screen share' : k)).join(', ');
+    return `Waiting for the host to let you use the ${what}...`;
+  }
+  if (classroomStore.isMutedAll) {
+    return 'The host muted everyone. Click your microphone to ask for permission.';
+  }
+  return `Your ${list} ${names.length > 1 ? 'are' : 'is'} locked by the host. Click to ask for permission.`;
+});
 
 // Mobile detection (screens narrower than 768px use mobile full-screen modal with PiP)
 const isMobile = ref(typeof window !== 'undefined' ? window.innerWidth < 768 : false);
@@ -1920,6 +1995,55 @@ const isLecturer = computed(() => {
   );
 });
 
+/**
+ * Who is running the room: the session's own host/lecturer/admin, plus anyone
+ * they have made a co-host (answered by the server in loadOwnPermissions).
+ *
+ * Moderation, materials and attendance checks sit here. Starting and ending
+ * the class stay on `isLecturer` alone -- a co-host is trusted with the
+ * controls, not with the room itself.
+ */
+const canModerate = computed(() => isLecturer.value || classroomStore.isCohost);
+
+type RosterRow = { identity: string; role?: string; isLocal?: boolean };
+
+const isCoHostRow = (p: RosterRow) => classroomStore.coHostIds.includes(p.identity);
+
+/**
+ * Roster role text. Co-host is a per-session appointment, so it comes from the
+ * co-hosts endpoint rather than from the participant's LiveKit role -- which
+ * still says "student" for someone running the room.
+ */
+function rosterRoleLabel(p: RosterRow, authority: string) {
+  if (p.role === 'lecturer' || p.role === 'admin') return authority;
+  return isCoHostRow(p) ? 'Co-host' : 'Student';
+}
+
+function rosterRoleClass(p: RosterRow) {
+  if (p.role === 'lecturer' || p.role === 'admin') return 'text-amber-400';
+  return isCoHostRow(p) ? 'text-violet-400' : 'text-slate-400';
+}
+
+/**
+ * Only the session's own authority may appoint a co-host, and never to
+ * themselves -- the server enforces exactly the same rule, this just keeps the
+ * button off rows where it could only fail.
+ */
+const canAppointCohost = (p: RosterRow) =>
+  isLecturer.value &&
+  !p.isLocal &&
+  p.role !== 'lecturer' &&
+  p.role !== 'admin' &&
+  p.identity !== sessionData.value?.hostId;
+
+async function toggleCohost(p: RosterRow) {
+  if (isCoHostRow(p)) {
+    await classroomStore.removeCohost(p.identity);
+  } else {
+    await classroomStore.addCohost(p.identity);
+  }
+}
+
 // Watch incoming verification broadcasted over LiveKit Data Channel
 watch(
   () => classroomStore.incomingVerification,
@@ -2050,6 +2174,13 @@ async function initClassroom() {
       console.warn('Session detail fetch error, using default params', err);
     }
 
+    // Adopt the room's moderation state before anyone can act on it: a student
+    // opening a muted lecture must see the lock the moment the page loads, not
+    // only when the host happens to say something.
+    if (sessionData.value) {
+      classroomStore.applyModerationState(sessionData.value);
+    }
+
     const session = sessionData.value;
 
     // 2. Scheduled or Lobby Check
@@ -2121,7 +2252,7 @@ async function initClassroom() {
       nextCheckCountdownSeconds.value = checkIntervalMinutes.value * 60;
     }
 
-    if (isLecturer.value) {
+    if (canModerate.value) {
       loadAttendanceRoster();
       startAutoCheckerTimer();
     }
@@ -2150,11 +2281,11 @@ async function checkSessionStatus() {
 }
 
 async function toggleCameraTrack() {
-  await classroomStore.toggleCamera();
+  guarded('camera', () => classroomStore.toggleCamera());
 }
 
 async function toggleScreenShareTrack() {
-  await classroomStore.toggleScreenShare();
+  guarded('screen', () => classroomStore.toggleScreenShare());
 }
 
 function toggleRaiseHand() {
@@ -2167,17 +2298,13 @@ function triggerReaction(emoji: string) {
   classroomStore.sendReaction(emoji);
 }
 
-function toggleMuteAll() {
-  isMutedAll.value = !isMutedAll.value;
-  classroomStore.setMuteAll(isMutedAll.value);
-}
-
 // ==================== AUTOMATED ATTENDANCE CHECKER ENGINE ====================
 
 function startAutoCheckerTimer() {
   if (autoCheckerInterval) clearInterval(autoCheckerInterval);
   autoCheckerInterval = setInterval(async () => {
-    if (!autoCheckerActive.value || !isLecturer.value) return;
+    // A co-host runs the checks too; the client-side gate matches the server's.
+    if (!autoCheckerActive.value || !canModerate.value) return;
 
     // Count down when there are remaining checks to be triggered
     if (checksCompleted.value < totalTargetChecks.value) {

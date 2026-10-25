@@ -97,7 +97,7 @@ class PermissionRequest(models.Model):
     session = models.ForeignKey(Session, on_delete=models.CASCADE, related_name="permission_requests")
     participant_id = models.CharField(max_length=128)
     participant_name = models.CharField(max_length=255)
-    request_type = models.CharField(max_length=32) # mic, camera, screen_share
+    request_type = models.CharField(max_length=32) # mic, camera, screen
     status = models.CharField(max_length=32, default="pending") # pending, approved, rejected
     requested_at = models.DateTimeField(default=timezone.now)
     reviewed_at = models.DateTimeField(null=True, blank=True)

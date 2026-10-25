@@ -4,9 +4,7 @@ import android.app.Activity
 import android.app.PictureInPictureParams
 import android.os.Build
 import android.util.Rational
-import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.slideInHorizontally
-import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.*
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -14,9 +12,11 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.PictureInPictureAlt
 import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material3.*
@@ -30,6 +30,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import online.podiumclass.app.ui.theme.*
 
@@ -51,12 +52,34 @@ fun ClassroomScreen(
     val session by viewModel.session.collectAsState()
     val isLoading by viewModel.isLoading.collectAsState()
     val isLecturer by viewModel.isLecturer.collectAsState()
+    val isModerator by viewModel.isModerator.collectAsState()
     val participants by viewModel.roomManager.participants.collectAsState()
     val isMicOn by viewModel.roomManager.isMicEnabled.collectAsState()
     val isCameraOn by viewModel.roomManager.isCameraEnabled.collectAsState()
     val isHandRaised by viewModel.roomManager.isHandRaised.collectAsState()
     val pinnedId by viewModel.pinnedParticipantId.collectAsState()
     val chatMessages by viewModel.chatMessages.collectAsState()
+
+    // Moderation & Permissions States
+    val isMutedAll by viewModel.isMutedAll.collectAsState()
+    val autoApproveMic by viewModel.autoApproveMic.collectAsState()
+    val permissionPolicy by viewModel.permissionPolicy.collectAsState()
+    val pendingRequests by viewModel.pendingRequests.collectAsState()
+    val coHosts by viewModel.coHosts.collectAsState()
+    val requestedKinds by viewModel.requestedKinds.collectAsState()
+    var showModerationModal by remember { mutableStateOf(false) }
+
+    // Live System Banner Message
+    var activeBannerMessage by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(Unit) {
+        viewModel.systemNotification.collect { msg ->
+            activeBannerMessage = msg
+            delay(3500)
+            if (activeBannerMessage == msg) {
+                activeBannerMessage = null
+            }
+        }
+    }
 
     // Attendance States
     var showHostAttendanceModal by remember { mutableStateOf(false) }
@@ -136,6 +159,44 @@ fun ClassroomScreen(
                         }
 
                         Row(verticalAlignment = Alignment.CenterVertically) {
+                            // Moderation Shield Button (for Host or Co-Host)
+                            if (isModerator) {
+                                Box {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        modifier = Modifier
+                                            .clip(RoundedCornerShape(10.dp))
+                                            .background(
+                                                if (pendingRequests.isNotEmpty()) AmberWarning.copy(alpha = 0.2f)
+                                                else IndigoPrimary.copy(alpha = 0.15f)
+                                            )
+                                            .border(
+                                                1.dp,
+                                                if (pendingRequests.isNotEmpty()) AmberWarning.copy(alpha = 0.4f)
+                                                else IndigoPrimary.copy(alpha = 0.3f),
+                                                RoundedCornerShape(10.dp)
+                                            )
+                                            .clickable { showModerationModal = true }
+                                            .padding(horizontal = 8.dp, vertical = 6.dp)
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.Shield,
+                                            contentDescription = "Moderation",
+                                            tint = if (pendingRequests.isNotEmpty()) AmberWarning else IndigoPrimary,
+                                            modifier = Modifier.size(14.dp)
+                                        )
+                                        Spacer(modifier = Modifier.width(4.dp))
+                                        Text(
+                                            text = if (pendingRequests.isNotEmpty()) "MOD (${pendingRequests.size})" else "MOD",
+                                            color = if (pendingRequests.isNotEmpty()) AmberWarning else IndigoPrimary,
+                                            fontSize = 10.sp,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                    }
+                                }
+                                Spacer(modifier = Modifier.width(6.dp))
+                            }
+
                             // Host: Attendance Manager Button with Live Badge
                             if (isLecturer) {
                                 Row(
@@ -149,7 +210,7 @@ fun ClassroomScreen(
                                             showHostAttendanceModal = true
                                         }
                                         .padding(horizontal = 8.dp, vertical = 6.dp)
-                                ) {
+                                    ) {
                                     Icon(
                                         imageVector = Icons.Default.Shield,
                                         contentDescription = "Attendance",
@@ -166,7 +227,7 @@ fun ClassroomScreen(
                                         fontWeight = FontWeight.Bold
                                     )
                                 }
-                                Spacer(modifier = Modifier.width(8.dp))
+                                Spacer(modifier = Modifier.width(6.dp))
                             }
 
                             // Picture-in-Picture Button
@@ -232,13 +293,57 @@ fun ClassroomScreen(
                             isMicOn = isMicOn,
                             isCameraOn = isCameraOn,
                             isHandRaised = isHandRaised,
+                            isModerator = isModerator,
+                            canUseMic = viewModel.canUse("mic"),
+                            canUseCamera = viewModel.canUse("camera"),
+                            isMicRequested = requestedKinds["mic"] == true,
+                            isCameraRequested = requestedKinds["camera"] == true,
+                            pendingModerationRequests = pendingRequests.size,
                             onToggleMic = { scope.launch { viewModel.roomManager.toggleMic() } },
                             onToggleCamera = { scope.launch { viewModel.roomManager.toggleCamera() } },
                             onFlipCamera = { scope.launch { viewModel.roomManager.flipCamera() } },
                             onToggleHand = { scope.launch { viewModel.roomManager.toggleHandRaise("Mobile User") } },
                             onSendReaction = { emoji -> scope.launch { viewModel.roomManager.sendReaction(emoji) } },
                             onToggleChat = { showChatDrawer = !showChatDrawer },
+                            onOpenModeration = { showModerationModal = true },
+                            onRequestMic = { viewModel.requestPermission("mic") },
+                            onRequestCamera = { viewModel.requestPermission("camera") },
                             onLeaveClick = onNavigateBack
+                        )
+                    }
+                }
+            }
+
+            // Real-Time System Notification Floating Banner
+            AnimatedVisibility(
+                visible = activeBannerMessage != null,
+                enter = fadeIn() + slideInVertically(initialOffsetY = { -it }),
+                exit = fadeOut() + slideOutVertically(targetOffsetY = { -it }),
+                modifier = Modifier
+                    .align(Alignment.TopCenter)
+                    .padding(top = 64.dp)
+            ) {
+                activeBannerMessage?.let { msg ->
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(14.dp))
+                            .background(Color(0xE61E1E26))
+                            .border(1.dp, CardBorder, RoundedCornerShape(14.dp))
+                            .padding(horizontal = 14.dp, vertical = 8.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Info,
+                            contentDescription = "Notification",
+                            tint = IndigoPrimary,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = msg,
+                            color = Color.White,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.SemiBold
                         )
                     }
                 }
@@ -266,6 +371,46 @@ fun ClassroomScreen(
                     isSubmitting = isSubmittingVerification,
                     isSuccess = verificationSuccess,
                     onConfirmPresent = { viewModel.submitStudentVerification() }
+                )
+            }
+
+            // Host / Co-Host Room Moderation Modal
+            if (showModerationModal && isModerator) {
+                RoomModerationModal(
+                    isMutedAll = isMutedAll,
+                    autoApproveMic = autoApproveMic,
+                    permissionPolicy = permissionPolicy,
+                    pendingRequests = pendingRequests,
+                    coHosts = coHosts,
+                    participants = participants,
+                    onDismiss = { showModerationModal = false },
+                    onToggleMuteAll = { viewModel.setMuteAll(!isMutedAll) },
+                    onToggleSmartMic = { viewModel.setAutoApproveMic(it) },
+                    onTogglePolicy = { kind ->
+                        val current = when (kind) {
+                            "mic" -> permissionPolicy.mic
+                            "camera" -> permissionPolicy.camera
+                            "screen" -> permissionPolicy.screen
+                            else -> "free"
+                        }
+                        val next = if (current == "approval") "free" else "approval"
+                        viewModel.setPermissionPolicy(kind, next)
+                    },
+                    onReviewRequest = { reqId, approve ->
+                        viewModel.reviewPermissionRequest(reqId, approve)
+                    },
+                    onAppointCoHost = { userId ->
+                        viewModel.appointCoHost(userId)
+                    },
+                    onRemoveCoHost = { userId ->
+                        viewModel.removeCoHost(userId)
+                    },
+                    onEndSession = {
+                        viewModel.endSession {
+                            showModerationModal = false
+                            onNavigateBack()
+                        }
+                    }
                 )
             }
 

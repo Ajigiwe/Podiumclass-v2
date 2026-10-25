@@ -32,17 +32,42 @@ class ClassroomViewModel(
     private val _currentUserRole = MutableStateFlow("student")
     val currentUserRole: StateFlow<String> = _currentUserRole.asStateFlow()
 
+    private val _currentUserId = MutableStateFlow<String?>(null)
+    val currentUserId: StateFlow<String?> = _currentUserId.asStateFlow()
+
+    // Moderation & Permissions States
+    val isMutedAll = MutableStateFlow(false)
+    val autoApproveMic = MutableStateFlow(false)
+    val permissionPolicy = MutableStateFlow(PermissionPolicyDto())
+    val myPermissions = MutableStateFlow(PermissionGrantDto())
+    val isCoHost = MutableStateFlow(false)
+    val pendingRequests = MutableStateFlow<List<PermissionRequestDto>>(emptyList())
+    val coHosts = MutableStateFlow<List<CoHostDto>>(emptyList())
+    val requestedKinds = MutableStateFlow<Map<String, Boolean>>(emptyMap())
+
     val isLecturer: StateFlow<Boolean> = _currentUserRole.map {
         it == "lecturer" || it == "admin"
+    }.stateIn(viewModelScope, SharingStarted.Eagerly, false)
+
+    val isModerator: StateFlow<Boolean> = combine(
+        _currentUserRole,
+        isCoHost,
+        _session,
+        _currentUserId
+    ) { role, cohost, sess, uid ->
+        role == "admin" || role == "lecturer" || cohost || (sess?.hostId != null && sess.hostId == uid)
     }.stateIn(viewModelScope, SharingStarted.Eagerly, false)
 
     // Stage Layout State
     private val _pinnedParticipantId = MutableStateFlow<String?>(null)
     val pinnedParticipantId: StateFlow<String?> = _pinnedParticipantId.asStateFlow()
 
-    // In-Class Chat
+    // In-Class Chat & System Notifications
     private val _chatMessages = MutableStateFlow<List<ChatMessageDto>>(emptyList())
     val chatMessages: StateFlow<List<ChatMessageDto>> = _chatMessages.asStateFlow()
+
+    private val _systemNotification = MutableSharedFlow<String>(extraBufferCapacity = 10)
+    val systemNotification: SharedFlow<String> = _systemNotification.asSharedFlow()
 
     // ==================== ATTENDANCE VERIFICATION STATE ====================
     val autoCheckerActive = MutableStateFlow(true)
@@ -68,20 +93,21 @@ class ClassroomViewModel(
             val apiUrl = tokenStorage.getApiUrl()
             api = ApiClient.create(tokenStorage, apiUrl)
             _currentUserRole.value = tokenStorage.roleFlow.first()
+            _currentUserId.value = tokenStorage.userIdFlow.first()
             initClassroom()
         }
 
-        // Listen for real-time verification broadcasts
+        // Real-time verification broadcasts
         viewModelScope.launch {
             roomManager.incomingVerification.collect { packet ->
-                if (!isLecturer.value) {
+                if (!isModerator.value) {
                     activeVerification.value = packet
                     verificationSuccess.value = false
                 }
             }
         }
 
-        // Listen for real-time chat messages
+        // Real-time chat messages
         viewModelScope.launch {
             roomManager.incomingChat.collect { packet ->
                 val newMsg = ChatMessageDto(
@@ -94,6 +120,36 @@ class ClassroomViewModel(
                 _chatMessages.update { it + newMsg }
             }
         }
+
+        // Real-time moderation broadcast
+        viewModelScope.launch {
+            roomManager.incomingModeration.collect { packet ->
+                applyModerationPacket(packet)
+            }
+        }
+
+        // Real-time permission request broadcast
+        viewModelScope.launch {
+            roomManager.incomingPermissionRequest.collect {
+                if (isModerator.value) {
+                    loadPendingRequests()
+                }
+            }
+        }
+
+        // Real-time permission response broadcast
+        viewModelScope.launch {
+            roomManager.incomingPermissionResponse.collect { packet ->
+                handlePermissionResponse(packet)
+            }
+        }
+
+        // Reconnect auto-resync
+        viewModelScope.launch {
+            roomManager.onReconnected.collect {
+                resyncModeration()
+            }
+        }
     }
 
     private suspend fun initClassroom() {
@@ -104,6 +160,7 @@ class ClassroomViewModel(
             val sessionRes = client.getSessionDetail(sessionId)
             val sessionData = sessionRes.document
             _session.value = sessionData
+            applyModerationState(sessionData)
 
             // 2. Parse Automated Attendance Settings
             sessionData.verificationCount?.let { totalTargetChecks.value = it }
@@ -137,9 +194,14 @@ class ClassroomViewModel(
                 localRole = _currentUserRole.value
             )
 
-            // 5. If Host: Start automated attendance checker loop & load roster
-            if (isLecturer.value) {
+            // 5. Load permissions & co-hosts
+            loadOwnPermissions()
+            loadCoHosts()
+
+            // 6. If Host/Moderator: start auto-checker engine and load inbox
+            if (isModerator.value) {
                 loadAttendanceRoster()
+                loadPendingRequests()
                 startAutoCheckerEngine()
             }
         } catch (e: Exception) {
@@ -149,12 +211,306 @@ class ClassroomViewModel(
         }
     }
 
+    // ==================== MODERATION & PERMISSIONS ENGINE ====================
+
+    fun applyModerationState(sessionDto: SessionDto) {
+        isMutedAll.value = sessionDto.isMutedAll
+        autoApproveMic.value = sessionDto.autoApproveMic
+        permissionPolicy.value = sessionDto.permissions
+        enforceLocks()
+    }
+
+    fun applyModerationPacket(packet: DataPacket) {
+        val wasMuted = isMutedAll.value
+        packet.isMutedAll?.let { isMutedAll.value = it }
+        packet.autoApproveMic?.let { autoApproveMic.value = it }
+        packet.permissions?.let { permissionPolicy.value = it }
+        if (packet.isMutedAll != null && packet.isMutedAll != wasMuted) {
+            val msg = if (packet.isMutedAll) "The host muted all microphones." else "The host unmuted microphones."
+            pushSystemMessage(msg)
+        }
+        viewModelScope.launch { loadOwnPermissions() }
+        enforceLocks()
+    }
+
+    fun handlePermissionResponse(packet: DataPacket) {
+        val localIdentity = roomManager.room?.localParticipant?.identity ?: _currentUserId.value
+        if (packet.target != null && packet.target == localIdentity) {
+            val kind = packet.requestType ?: "mic"
+            requestedKinds.update { it + (kind to false) }
+            val kindLabel = if (kind == "mic") "microphone" else if (kind == "camera") "camera" else "screen"
+            if (packet.granted == true) {
+                myPermissions.update {
+                    when (kind) {
+                        "mic" -> it.copy(mic = true)
+                        "camera" -> it.copy(camera = true)
+                        "screen" -> it.copy(screen = true)
+                        else -> it
+                    }
+                }
+                pushSystemMessage("The host allowed your $kindLabel.")
+                viewModelScope.launch {
+                    if (kind == "mic") roomManager.setMicEnabled(true)
+                    if (kind == "camera") roomManager.setCameraEnabled(true)
+                }
+            } else {
+                pushSystemMessage("The host declined your $kindLabel request.")
+            }
+        }
+    }
+
+    fun canUse(kind: String): Boolean {
+        if (isModerator.value) return true
+        when (kind) {
+            "mic" -> {
+                if (myPermissions.value.mic) return true
+                if (isMutedAll.value) return false
+                return permissionPolicy.value.mic == "free"
+            }
+            "camera" -> {
+                if (myPermissions.value.camera) return true
+                return permissionPolicy.value.camera == "free"
+            }
+            "screen" -> {
+                if (myPermissions.value.screen) return true
+                return permissionPolicy.value.screen == "free"
+            }
+            else -> return true
+        }
+    }
+
+    fun enforceLocks() {
+        viewModelScope.launch {
+            if (roomManager.isMicEnabled.value && !canUse("mic")) {
+                roomManager.setMicEnabled(false)
+            }
+            if (roomManager.isCameraEnabled.value && !canUse("camera")) {
+                roomManager.setCameraEnabled(false)
+            }
+        }
+    }
+
+    private suspend fun persistModeration(patch: PatchSessionRequest): Boolean {
+        val client = api ?: return false
+        return try {
+            val res = client.patchSession(sessionId, patch)
+            applyModerationState(res.document)
+            roomManager.broadcastModeration(
+                isMutedAll = isMutedAll.value,
+                autoApproveMic = autoApproveMic.value,
+                permissions = permissionPolicy.value
+            )
+            true
+        } catch (e: Exception) {
+            pushSystemMessage("That moderation change could not be saved.")
+            false
+        }
+    }
+
+    fun setMuteAll(muted: Boolean) {
+        viewModelScope.launch {
+            val ok = persistModeration(PatchSessionRequest(isMutedAll = muted))
+            if (ok && muted) {
+                myPermissions.value = myPermissions.value.copy(mic = false)
+                enforceLocks()
+            }
+        }
+    }
+
+    fun setAutoApproveMic(enabled: Boolean) {
+        viewModelScope.launch {
+            persistModeration(PatchSessionRequest(autoApproveMic = enabled))
+        }
+    }
+
+    fun setPermissionPolicy(kind: String, mode: String) {
+        viewModelScope.launch {
+            val current = permissionPolicy.value
+            val updated = when (kind) {
+                "mic" -> current.copy(mic = mode)
+                "camera" -> current.copy(camera = mode)
+                "screen" -> current.copy(screen = mode)
+                else -> current
+            }
+            val map = mapOf(
+                "mic" to updated.mic,
+                "camera" to updated.camera,
+                "screen" to updated.screen
+            )
+            persistModeration(PatchSessionRequest(permissions = map))
+        }
+    }
+
+    fun loadOwnPermissions() {
+        viewModelScope.launch {
+            val client = api ?: return@launch
+            try {
+                val res = client.getMyPermissions(sessionId)
+                val grant = res.document
+                myPermissions.value = grant
+                isCoHost.value = grant.cohost
+                enforceLocks()
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        }
+    }
+
+    fun loadPendingRequests() {
+        viewModelScope.launch {
+            val client = api ?: return@launch
+            if (!isModerator.value) return@launch
+            try {
+                val res = client.getPendingPermissionRequests(sessionId)
+                pendingRequests.value = res.documents
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        }
+    }
+
+    fun loadCoHosts() {
+        viewModelScope.launch {
+            val client = api ?: return@launch
+            try {
+                val res = client.getCoHosts(sessionId)
+                coHosts.value = res.documents
+                val cohostIds = res.documents.map { it.userId }.toSet()
+                roomManager.setCoHosts(cohostIds)
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        }
+    }
+
+    fun appointCoHost(userId: String) {
+        viewModelScope.launch {
+            val client = api ?: return@launch
+            try {
+                client.appointCoHost(sessionId, AppointCoHostRequest(userId))
+                loadCoHosts()
+                pushSystemMessage("Co-host appointed.")
+            } catch (e: Exception) {
+                pushSystemMessage("Could not appoint co-host.")
+            }
+        }
+    }
+
+    fun removeCoHost(userId: String) {
+        viewModelScope.launch {
+            val client = api ?: return@launch
+            try {
+                client.removeCoHost(sessionId, userId)
+                loadCoHosts()
+                pushSystemMessage("Co-host removed.")
+            } catch (e: Exception) {
+                pushSystemMessage("Could not remove co-host.")
+            }
+        }
+    }
+
+    fun requestPermission(kind: String) {
+        viewModelScope.launch {
+            val client = api ?: return@launch
+            if (requestedKinds.value[kind] == true) return@launch
+            requestedKinds.update { it + (kind to true) }
+            val kindLabel = if (kind == "mic") "microphone" else if (kind == "camera") "camera" else "screen"
+            try {
+                val res = client.requestPermission(sessionId, PermissionRequestCreate(kind))
+                val req = res.document
+                if (req.status == "approved") {
+                    myPermissions.update {
+                        when (kind) {
+                            "mic" -> it.copy(mic = true)
+                            "camera" -> it.copy(camera = true)
+                            "screen" -> it.copy(screen = true)
+                            else -> it
+                        }
+                    }
+                    requestedKinds.update { it + (kind to false) }
+                    pushSystemMessage("${kindLabel.replaceFirstChar { it.uppercase() }} approved automatically.")
+                    if (kind == "mic") roomManager.setMicEnabled(true)
+                    if (kind == "camera") roomManager.setCameraEnabled(true)
+                } else {
+                    pushSystemMessage("Asked the host for the $kindLabel.")
+                    roomManager.broadcastPermissionRequest(kind)
+                }
+            } catch (e: Exception) {
+                requestedKinds.update { it + (kind to false) }
+                pushSystemMessage("The $kindLabel request could not be sent.")
+            }
+        }
+    }
+
+    fun reviewPermissionRequest(requestId: String, approve: Boolean) {
+        viewModelScope.launch {
+            val client = api ?: return@launch
+            val req = pendingRequests.value.find { it.id == requestId } ?: return@launch
+            try {
+                client.reviewPermissionRequest(sessionId, requestId, PermissionReviewRequest(if (approve) "approved" else "rejected"))
+                pendingRequests.update { list -> list.filter { it.id != requestId } }
+                roomManager.broadcastPermissionResponse(req.participantId, req.requestType, approve)
+                val kindLabel = if (req.requestType == "mic") "microphone" else req.requestType
+                pushSystemMessage(
+                    if (approve) "Allowed ${req.participantName} to use their $kindLabel."
+                    else "Declined ${req.participantName}'s $kindLabel request."
+                )
+            } catch (e: Exception) {
+                pushSystemMessage("That answer could not be saved.")
+            }
+        }
+    }
+
+    fun endSession(onEnded: () -> Unit) {
+        viewModelScope.launch {
+            val client = api ?: return@launch
+            try {
+                client.endSession(sessionId)
+                pushSystemMessage("The classroom session has ended.")
+                delay(500)
+                roomManager.disconnect()
+                onEnded()
+            } catch (e: Exception) {
+                pushSystemMessage("Could not end the session.")
+            }
+        }
+    }
+
+    fun resyncModeration() {
+        viewModelScope.launch {
+            val client = api ?: return@launch
+            try {
+                val res = client.getSessionDetail(sessionId)
+                applyModerationState(res.document)
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+            loadOwnPermissions()
+            loadCoHosts()
+            if (isModerator.value) loadPendingRequests()
+        }
+    }
+
+    fun pushSystemMessage(message: String) {
+        _systemNotification.tryEmit(message)
+        val msg = ChatMessageDto(
+            id = "sys_${System.currentTimeMillis()}_${(100..999).random()}",
+            sender = "Podium",
+            message = message,
+            role = "system",
+            time = java.text.SimpleDateFormat("HH:mm", java.util.Locale.getDefault()).format(java.util.Date())
+        )
+        _chatMessages.update { it + msg }
+    }
+
+    // ==================== ATTENDANCE VERIFICATION ====================
+
     private fun startAutoCheckerEngine() {
         autoCheckerJob?.cancel()
         autoCheckerJob = viewModelScope.launch {
             while (true) {
                 delay(1000)
-                if (autoCheckerActive.value && isLecturer.value) {
+                if (autoCheckerActive.value && isModerator.value) {
                     if (checksCompleted.value < totalTargetChecks.value) {
                         if (nextCheckCountdownSeconds.value > 0) {
                             nextCheckCountdownSeconds.value--
@@ -287,7 +643,7 @@ class ClassroomViewModel(
         viewModelScope.launch {
             roomManager.sendChatMessage(
                 text = text,
-                senderName = if (isLecturer.value) "Host" else "Student",
+                senderName = if (isModerator.value) "Host" else "Student",
                 role = _currentUserRole.value
             )
         }

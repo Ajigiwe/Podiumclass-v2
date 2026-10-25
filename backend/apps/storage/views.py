@@ -24,14 +24,15 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from apps.classrooms.access import can_moderate
 from apps.classrooms.models import Session
 from .models import SessionMaterial
 from .serializers import MATERIAL_TYPES, SessionMaterialSerializer
 
 
 def _can_manage_materials(user, session) -> bool:
-    """Same rule SessionDetailView.patch uses, so a host is never locked out."""
-    return user.role in ("admin", "lecturer") or session.host_id == user.id
+    """Host, lecturer, admin, or an active co-host -- see classrooms.access."""
+    return can_moderate(user, session)
 
 
 def _session_or_404(session_id):

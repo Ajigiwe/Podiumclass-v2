@@ -133,6 +133,14 @@ fun StageVideoView(
                         fontSize = 9.sp,
                         fontWeight = FontWeight.Black
                     )
+                } else if (participant.isCoHost) {
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text(
+                        text = "CO-HOST",
+                        color = Color(0xFF67E8F9),
+                        fontSize = 9.sp,
+                        fontWeight = FontWeight.Black
+                    )
                 }
             }
 

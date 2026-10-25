@@ -27,6 +27,7 @@ data class ParticipantTileState(
     val name: String,
     val role: String = "student",
     val isLocal: Boolean = false,
+    val isCoHost: Boolean = false,
     val isSpeaking: Boolean = false,
     val hasVideo: Boolean = false,
     val hasScreenShare: Boolean = false,
@@ -66,7 +67,27 @@ class LiveKitRoomManager(private val context: Context) {
     private val _incomingReaction = MutableSharedFlow<String>(extraBufferCapacity = 20)
     val incomingReaction: SharedFlow<String> = _incomingReaction.asSharedFlow()
 
+    // Moderation & Permissions real-time events
+    private val _incomingModeration = MutableSharedFlow<DataPacket>(extraBufferCapacity = 20)
+    val incomingModeration: SharedFlow<DataPacket> = _incomingModeration.asSharedFlow()
+
+    private val _incomingPermissionRequest = MutableSharedFlow<DataPacket>(extraBufferCapacity = 20)
+    val incomingPermissionRequest: SharedFlow<DataPacket> = _incomingPermissionRequest.asSharedFlow()
+
+    private val _incomingPermissionResponse = MutableSharedFlow<DataPacket>(extraBufferCapacity = 20)
+    val incomingPermissionResponse: SharedFlow<DataPacket> = _incomingPermissionResponse.asSharedFlow()
+
+    private val _onReconnected = MutableSharedFlow<Unit>(extraBufferCapacity = 5)
+    val onReconnected: SharedFlow<Unit> = _onReconnected.asSharedFlow()
+
     private val raisedHandsSet = mutableSetOf<String>()
+    private val coHostsSet = mutableSetOf<String>()
+
+    fun setCoHosts(ids: Set<String>) {
+        coHostsSet.clear()
+        coHostsSet.addAll(ids)
+        updateParticipantsRoster()
+    }
 
     suspend fun connect(url: String, token: String, localName: String, localRole: String) {
         val newRoom = LiveKit.create(context)
@@ -97,6 +118,11 @@ class LiveKitRoomManager(private val context: Context) {
             is RoomEvent.Disconnected -> {
                 _isConnected.value = false
                 _participants.value = emptyList()
+            }
+            is RoomEvent.Reconnected -> {
+                _isConnected.value = true
+                _onReconnected.tryEmit(Unit)
+                updateParticipantsRoster(localName, localRole)
             }
             is RoomEvent.ParticipantConnected,
             is RoomEvent.ParticipantDisconnected,
@@ -139,6 +165,18 @@ class LiveKitRoomManager(private val context: Context) {
                         updateParticipantsRoster()
                     }
                 }
+                "moderation" -> {
+                    _incomingModeration.tryEmit(packet)
+                    if (packet.isMutedAll == true && _isMicEnabled.value) {
+                        scope.launch { setMicEnabled(false) }
+                    }
+                }
+                "permission_request" -> {
+                    _incomingPermissionRequest.tryEmit(packet)
+                }
+                "permission_response" -> {
+                    _incomingPermissionResponse.tryEmit(packet)
+                }
                 "mute_all" -> {
                     if (packet.muted == true && _isMicEnabled.value) {
                         scope.launch { setMicEnabled(false) }
@@ -162,13 +200,15 @@ class LiveKitRoomManager(private val context: Context) {
         val hasLocalCam = local.videoTrackPublications.any { it.track?.isMuted == false }
         val hasLocalMic = local.audioTrackPublications.any { it.track?.isMuted == false }
         val localVideo = local.videoTrackPublications.firstOrNull()?.track
+        val localIdentity = local.identity ?: "local"
 
         list.add(
             ParticipantTileState(
-                identity = local.identity ?: "local",
+                identity = localIdentity,
                 name = local.name ?: defaultLocalName,
                 role = defaultLocalRole,
                 isLocal = true,
+                isCoHost = coHostsSet.contains(localIdentity),
                 isSpeaking = local.isSpeaking,
                 hasVideo = hasLocalCam,
                 hasScreenShare = false,
@@ -183,13 +223,15 @@ class LiveKitRoomManager(private val context: Context) {
             val remoteVideo = p.videoTrackPublications.firstOrNull { it.track != null }?.track
             val hasVideo = remoteVideo != null && !remoteVideo.isMuted
             val hasMic = p.audioTrackPublications.any { it.track?.isMuted == false }
+            val pIdentity = p.identity ?: "remote_${p.sid}"
 
             list.add(
                 ParticipantTileState(
-                    identity = p.identity ?: "remote_${p.sid}",
+                    identity = pIdentity,
                     name = p.name ?: p.identity ?: "Student",
                     role = "student",
                     isLocal = false,
+                    isCoHost = coHostsSet.contains(pIdentity),
                     isSpeaking = p.isSpeaking,
                     hasVideo = hasVideo,
                     hasScreenShare = false,
@@ -285,6 +327,38 @@ class LiveKitRoomManager(private val context: Context) {
         publishData(packet, "moderation")
     }
 
+    suspend fun broadcastModeration(
+        isMutedAll: Boolean,
+        autoApproveMic: Boolean,
+        permissions: online.podiumclass.app.data.api.models.PermissionPolicyDto
+    ) {
+        val packet = DataPacket(
+            type = "moderation",
+            isMutedAll = isMutedAll,
+            autoApproveMic = autoApproveMic,
+            permissions = permissions
+        )
+        publishData(packet, "moderation")
+    }
+
+    suspend fun broadcastPermissionRequest(requestType: String) {
+        val packet = DataPacket(
+            type = "permission_request",
+            requestType = requestType
+        )
+        publishData(packet, "moderation")
+    }
+
+    suspend fun broadcastPermissionResponse(target: String, requestType: String, granted: Boolean) {
+        val packet = DataPacket(
+            type = "permission_response",
+            target = target,
+            requestType = requestType,
+            granted = granted
+        )
+        publishData(packet, "moderation")
+    }
+
     private suspend fun publishData(packet: DataPacket, topic: String) {
         val r = room ?: return
         try {
@@ -301,5 +375,6 @@ class LiveKitRoomManager(private val context: Context) {
         _isConnected.value = false
         _participants.value = emptyList()
         raisedHandsSet.clear()
+        coHostsSet.clear()
     }
 }

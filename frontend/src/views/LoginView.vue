@@ -46,7 +46,7 @@
         </button>
 
         <!-- Development / LAN Access for Mobile Testing -->
-        <div v-if="isDev" class="pt-4 mt-2 border-t border-white/10 flex flex-col gap-2">
+        <div v-if="showDevLogin" class="pt-4 mt-2 border-t border-white/10 flex flex-col gap-2">
           <p class="text-[9px] font-bold text-slate-400 uppercase tracking-widest text-center">Dev / Mobile Quick Access</p>
           <div class="flex gap-2">
             <button
@@ -80,17 +80,28 @@
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue';
+import { ref, computed, onMounted } from 'vue';
 import { useRouter, useRoute } from 'vue-router';
 import { useAuthStore } from '../stores/auth';
+import { useFeaturesStore } from '../stores/features';
 import { api } from '../api/client';
 
 const router = useRouter();
 const route = useRoute();
 const authStore = useAuthStore();
+const features = useFeaturesStore();
 const isLoading = ref(false);
 const errorMessage = ref<string | null>(null);
 const isDev = import.meta.env.DEV;
+
+// The DEV quick-access buttons only work when the backend has DJANGO_DEV_LOGIN
+// switched on, so hide them unless it says it will honour them. The router
+// guard skips the feature fetch on public routes, hence the explicit load.
+const showDevLogin = computed(() => isDev && features.devLogin);
+
+onMounted(() => {
+  if (!features.loaded) void features.loadFeatures();
+});
 
 const GOOGLE_CLIENT_ID = '148808386481-qp65l50jmuabfte437aafmh85esth944.apps.googleusercontent.com';
 

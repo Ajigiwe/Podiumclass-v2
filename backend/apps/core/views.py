@@ -1,3 +1,4 @@
+from django.conf import settings
 from rest_framework import status
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
@@ -46,12 +47,20 @@ class FeatureFlagsView(APIView):
     ``wallet_payments`` is disabled) without waiting for a privileged call.
 
     Returns only the boolean state, never configuration or secrets.
+    ``devLogin`` is also a plain boolean: it tells the login page whether the
+    backend will accept a credential-less POST at all, so the DEV quick-access
+    buttons never appear (and fail) on a server that has it switched off.
     """
 
     permission_classes = [AllowAny]
 
     def get(self, request):
-        return Response({"features": features.public_flags()})
+        return Response({
+            "features": features.public_flags(),
+            # The same effective test the view uses, so the login page never
+            # offers buttons this deployment would refuse.
+            "devLogin": settings.DEV_LOGIN_ENABLED and settings.DEBUG,
+        })
 
 
 class AdminSettingsView(APIView):

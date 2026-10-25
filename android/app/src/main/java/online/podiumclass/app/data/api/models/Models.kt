@@ -60,6 +60,58 @@ data class AutoAttendanceSettingsDto(
 )
 
 @Serializable
+data class PermissionPolicyDto(
+    val mic: String = "free",
+    val camera: String = "free",
+    val screen: String = "free"
+)
+
+@Serializable
+data class PermissionGrantDto(
+    val participantId: String? = null,
+    val mic: Boolean = false,
+    val camera: Boolean = false,
+    val screen: Boolean = false,
+    val cohost: Boolean = false
+)
+
+@Serializable
+data class PermissionRequestDto(
+    val id: String,
+    val participantId: String,
+    val participantName: String,
+    val requestType: String,
+    val status: String = "pending",
+    val requestedAt: String? = null,
+    val reviewedAt: String? = null,
+    val reviewedBy: String? = null
+)
+
+@Serializable
+data class PermissionRequestCreate(
+    val requestType: String
+)
+
+@Serializable
+data class PermissionReviewRequest(
+    val status: String
+)
+
+@Serializable
+data class CoHostDto(
+    val id: String,
+    val userId: String,
+    val userName: String,
+    val assignedBy: String? = null,
+    val assignedAt: String? = null
+)
+
+@Serializable
+data class AppointCoHostRequest(
+    val userId: String
+)
+
+@Serializable
 data class SessionDto(
     val id: String,
     val title: String,
@@ -77,7 +129,11 @@ data class SessionDto(
     val participantCount: Int = 0,
     val hostId: String? = null,
     val verificationCount: Int? = 3,
-    val autoAttendanceSettings: AutoAttendanceSettingsDto? = null
+    val autoAttendanceSettings: AutoAttendanceSettingsDto? = null,
+    val isMutedAll: Boolean = false,
+    val autoApproveMic: Boolean = false,
+    val permissions: PermissionPolicyDto = PermissionPolicyDto(),
+    val backupModId: String? = null
 )
 
 @Serializable
@@ -98,7 +154,10 @@ data class PatchSessionRequest(
     val autoAttendanceSettings: AutoAttendanceSettingsDto? = null,
     val title: String? = null,
     val status: String? = null,
-    val is_active: Boolean? = null
+    val is_active: Boolean? = null,
+    val isMutedAll: Boolean? = null,
+    val autoApproveMic: Boolean? = null,
+    val permissions: Map<String, String>? = null
 )
 
 @Serializable
@@ -193,5 +252,12 @@ data class DataPacket(
     val verificationNumber: Int? = null,
     val timeLimitSeconds: Int? = null,
     val totalTargetChecks: Int? = null,
-    val muted: Boolean? = null
+    val muted: Boolean? = null,
+    // Moderation & Permissions
+    val isMutedAll: Boolean? = null,
+    val autoApproveMic: Boolean? = null,
+    val permissions: PermissionPolicyDto? = null,
+    val requestType: String? = null,
+    val target: String? = null,
+    val granted: Boolean? = null
 )

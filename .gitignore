@@ -42,6 +42,15 @@ dist/
 # Archive of the previous system: it embeds its own .env with live credentials.
 podium-lms-package.zip
 
+# --- Android ----------------------------------------------------------------
+# Gradle state and the machine-local SDK path: neither is shared between
+# developers, and local.properties records where this machine installed the
+# Android SDK.
+android/.gradle/
+android/local.properties
+android/build/
+android/app/build/
+
 # --- OS / editors -----------------------------------------------------------
 .DS_Store
 Thumbs.db

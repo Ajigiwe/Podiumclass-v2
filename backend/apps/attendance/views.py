@@ -10,6 +10,7 @@ from apps.accounts.auth import (
 )
 from apps.core.guards import require_feature
 from .models import Attendance, AttendanceLog, Verification, VerificationResponse
+from apps.classrooms.access import can_moderate
 from apps.classrooms.models import Session
 from .serializers import AttendanceRecordSerializer, SessionAttendanceSerializer
 
@@ -63,6 +64,27 @@ def _require_lecturer(user):
         return
     if user.role not in ("lecturer", "admin"):
         raise PermissionDenied({"code": "LECTURER_REQUIRED", "message": "Only lecturers or admins may perform this action."})
+
+
+def _require_session_access(user, session_id):
+    """
+    Service key, lecturer/admin, or an active co-host of *this* session.
+
+    Driving a room's timed presence checks is exactly what a co-host is
+    appointed to do, so session-scoped verification endpoints accept them.
+
+    The unscoped session list deliberately keeps ``_require_lecturer``: a
+    co-host's authority never extends past the room they were handed.
+    """
+    if user is None:
+        return  # trusted service key
+    if user.role in ("lecturer", "admin"):
+        return
+    if session_id:
+        session = Session.objects.filter(id=session_id, is_deleted=False).first()
+        if session is not None and can_moderate(user, session):
+            return
+    raise PermissionDenied({"code": "LECTURER_REQUIRED", "message": "Only lecturers, admins or co-hosts of this session may perform this action."})
 
 class AttendanceSessionsAPIView(APIView):
     """
@@ -141,7 +163,7 @@ class AttendanceSessionDetailAPIView(APIView):
     def get(self, request, session_id):
         require_feature("external_attendance_api")
         caller = check_attendance_api_key(request)
-        _require_lecturer(caller)
+        _require_session_access(caller, session_id)
 
         try:
             session = Session.objects.get(id=session_id, is_deleted=False)
@@ -304,9 +326,12 @@ class VerificationTriggerView(APIView):
         from datetime import timedelta
 
         auth_user = check_attendance_api_key(request)
-        _require_lecturer(auth_user)
-
+        # Auth on a session-scoped action needs the session: read it first so a
+        # co-host of that room is recognised. A caller without credentials is
+        # already rejected inside check_attendance_api_key.
         session_id = request.data.get("sessionId")
+        _require_session_access(auth_user, session_id)
+
         # The actor is the authenticated user, not a client-supplied label.
         if auth_user is not None:
             triggered_by = auth_user.id

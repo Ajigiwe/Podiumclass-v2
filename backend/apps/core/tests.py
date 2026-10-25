@@ -1,4 +1,4 @@
-from django.test import TestCase
+from django.test import TestCase, override_settings
 from rest_framework.test import APIClient
 
 from apps.accounts.auth import issue_token
@@ -206,3 +206,34 @@ class FeatureStateHelperTests(TestCase):
         features.seed_all()
         # Custom choice survives re-seeding.
         self.assertTrue(features.is_enabled("recordings"))
+
+
+class DevLoginFlagExposureTests(TestCase):
+    """
+    The login page needs to know whether the backend will honour a
+    credential-less POST, so it can hide the DEV quick-access buttons instead
+    of showing controls that always fail.
+    """
+
+    def setUp(self):
+        self.client = APIClient()
+
+    def test_features_endpoint_reports_dev_login_off_by_default(self):
+        with override_settings(DEBUG=True, DEV_LOGIN_ENABLED=False):
+            res = self.client.get("/api/v1/core/features/")
+            self.assertEqual(res.status_code, 200)
+            body = res.json()["document"]
+            self.assertIn("features", body)
+            self.assertIs(body["devLogin"], False)
+
+    @override_settings(DEBUG=False, DEV_LOGIN_ENABLED=True)
+    def test_features_endpoint_reports_dev_login_off_without_debug(self):
+        # Same effective test the view uses: production must advertise False
+        # even when the switch itself is set.
+        res = self.client.get("/api/v1/core/features/")
+        self.assertIs(res.json()["document"]["devLogin"], False)
+
+    @override_settings(DEBUG=True, DEV_LOGIN_ENABLED=True)
+    def test_features_endpoint_reports_dev_login_when_enabled(self):
+        res = self.client.get("/api/v1/core/features/")
+        self.assertIs(res.json()["document"]["devLogin"], True)

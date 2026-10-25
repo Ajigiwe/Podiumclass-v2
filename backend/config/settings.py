@@ -79,6 +79,28 @@ def env_secret(name, dev_placeholder):
 # prints the entire URLconf.
 DEBUG = env_bool('DJANGO_DEBUG', env_bool('DEBUG', False))
 
+# Credential-less sign-in for local/mobile testing (the "DEV / MOBILE QUICK
+# ACCESS" buttons). Off unless DJANGO_DEV_LOGIN is set explicitly.
+#
+# This is only the switch. The *effective* test is `DEV_LOGIN_ENABLED and
+# DEBUG`, applied at every point of use, so a deployment with DEBUG off
+# (production) can never enable this however else it is configured -- and both
+# halves stay independently testable.
+DEV_LOGIN_ENABLED = env_bool('DJANGO_DEV_LOGIN', False)
+if DEV_LOGIN_ENABLED:
+    if DEBUG:
+        logger.warning(
+            "DJANGO_DEV_LOGIN is on: POST /api/v1/accounts/google/ will mint "
+            "JWTs without a Google credential, including an admin one. Unset "
+            "it wherever that URL is reachable by anyone but you.",
+        )
+    else:
+        logger.warning(
+            "DJANGO_DEV_LOGIN is set but DJANGO_DEBUG is off, so "
+            "credential-less sign-in stays disabled. Unset DJANGO_DEV_LOGIN "
+            "in this environment to silence this.",
+        )
+
 # SECRET_KEY signs session cookies, password-reset tokens AND (by inheritance)
 # PODIUM_JWT_SECRET, i.e. every authentication token in the system.
 SECRET_KEY = os.getenv('DJANGO_SECRET_KEY') or os.getenv('NEXTAUTH_SECRET')
