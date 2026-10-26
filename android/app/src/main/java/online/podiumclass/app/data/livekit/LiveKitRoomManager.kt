@@ -94,7 +94,7 @@ class LiveKitRoomManager(private val context: Context) {
         room = newRoom
 
         scope.launch {
-            newRoom.events.collect { event ->
+            newRoom.events.events.collect { event ->
                 handleRoomEvent(event, localName, localRole)
             }
         }
@@ -155,7 +155,7 @@ class LiveKitRoomManager(private val context: Context) {
                     packet.emoji?.let { _incomingReaction.tryEmit(it) }
                 }
                 "hand" -> {
-                    val identity = sender?.identity ?: packet.identity
+                    val identity = sender?.identity?.value ?: packet.identity
                     if (identity != null) {
                         if (packet.raised == true) {
                             raisedHandsSet.add(identity)
@@ -197,10 +197,10 @@ class LiveKitRoomManager(private val context: Context) {
 
         // Local participant
         val local = r.localParticipant
-        val hasLocalCam = local.videoTrackPublications.any { it.track?.isMuted == false }
-        val hasLocalMic = local.audioTrackPublications.any { it.track?.isMuted == false }
-        val localVideo = local.videoTrackPublications.firstOrNull()?.track
-        val localIdentity = local.identity ?: "local"
+        val hasLocalCam = local.videoTrackPublications.any { (pub, track) -> !pub.muted && track != null }
+        val hasLocalMic = local.audioTrackPublications.any { (pub, _) -> !pub.muted }
+        val localVideo = local.videoTrackPublications.firstOrNull { (pub, track) -> !pub.muted && track != null }?.second
+        val localIdentity = local.identity?.value ?: "local"
 
         list.add(
             ParticipantTileState(
@@ -220,15 +220,15 @@ class LiveKitRoomManager(private val context: Context) {
 
         // Remote participants
         r.remoteParticipants.values.forEach { p ->
-            val remoteVideo = p.videoTrackPublications.firstOrNull { it.track != null }?.track
-            val hasVideo = remoteVideo != null && !remoteVideo.isMuted
-            val hasMic = p.audioTrackPublications.any { it.track?.isMuted == false }
-            val pIdentity = p.identity ?: "remote_${p.sid}"
+            val remoteVideo = p.videoTrackPublications.firstOrNull { (pub, track) -> !pub.muted && track != null }?.second
+            val hasVideo = remoteVideo != null
+            val hasMic = p.audioTrackPublications.any { (pub, _) -> !pub.muted }
+            val pIdentity = p.identity?.value ?: "remote_${p.sid.value}"
 
             list.add(
                 ParticipantTileState(
                     identity = pIdentity,
-                    name = p.name ?: p.identity ?: "Student",
+                    name = p.name ?: p.identity?.value ?: "Student",
                     role = "student",
                     isLocal = false,
                     isCoHost = coHostsSet.contains(pIdentity),
@@ -236,7 +236,7 @@ class LiveKitRoomManager(private val context: Context) {
                     hasVideo = hasVideo,
                     hasScreenShare = false,
                     isMicOn = hasMic,
-                    isHandRaised = raisedHandsSet.contains(p.identity),
+                    isHandRaised = raisedHandsSet.contains(pIdentity),
                     videoTrack = remoteVideo
                 )
             )
@@ -269,7 +269,7 @@ class LiveKitRoomManager(private val context: Context) {
 
     suspend fun flipCamera() {
         val r = room ?: return
-        val localVideo = r.localParticipant.videoTrackPublications.firstOrNull()?.track as? LocalVideoTrack
+        val localVideo = r.localParticipant.videoTrackPublications.firstOrNull()?.second as? LocalVideoTrack
         // Switch position
         localVideo?.let {
             // LiveKit SDK handles camera options
@@ -279,7 +279,7 @@ class LiveKitRoomManager(private val context: Context) {
     suspend fun toggleHandRaise(localName: String) {
         val next = !_isHandRaised.value
         _isHandRaised.value = next
-        val identity = room?.localParticipant?.identity ?: "local"
+        val identity = room?.localParticipant?.identity?.value ?: "local"
         if (next) raisedHandsSet.add(identity) else raisedHandsSet.remove(identity)
 
         val packet = DataPacket(

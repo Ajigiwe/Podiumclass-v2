@@ -1,5 +1,5 @@
 import { defineStore } from 'pinia';
-import { ref, shallowRef, nextTick } from 'vue';
+import { ref, shallowRef, computed, nextTick } from 'vue';
 import {
   Room,
   RoomEvent,
@@ -67,6 +67,25 @@ interface DataMessage {
     | 'permission_response'
     | 'cohost';
   [key: string]: any;
+}
+
+/**
+ * One server-side recording (LiveKit Egress writes the MP4; this client only
+ * asks for it to start or stop and polls for what the worker reports).
+ */
+interface Recording {
+  id: string;
+  sessionId: string;
+  title: string;
+  status: string;
+  isLive: boolean;
+  canPlay: boolean;
+  error: string | null;
+  startedAt: string | null;
+  endedAt: string | null;
+  durationSeconds: number | null;
+  sizeBytes: number | null;
+  fileUrl: string | null;
 }
 
 const MEDIA_LABELS: Record<MediaKind, string> = {
@@ -160,6 +179,20 @@ export const useClassroomStore = defineStore('classroom', () => {
     isModerator.value = joinRole === 'lecturer' || active;
     if (!isModerator.value) pendingRequests.value = [];
   }
+
+  // --- recording ---------------------------------------------------------
+  // The MP4 is written by the server (LiveKit Egress), so this client only
+  // ever holds a *claim* about a recording: what the last status call said.
+  // Nothing here can make a recording exist -- that is the point.
+  const recordings = ref<Recording[]>([]);
+  const activeRecording = ref<Recording | null>(null);
+  const recordingError = ref<string | null>(null);
+  // Elapsed seconds for the REC timer, ticked only while a recording is live.
+  const recordingSeconds = ref(0);
+  let recordingPoll: ReturnType<typeof setInterval> | null = null;
+  let recordingClock: ReturnType<typeof setInterval> | null = null;
+
+  const isRecording = computed(() => !!activeRecording.value?.isLive);
 
   /**
    * DOM registry: identity -> <video> element.
@@ -705,6 +738,10 @@ export const useClassroomStore = defineStore('classroom', () => {
       void loadOwnPermissions();
       if (isModerator.value) void loadPendingRequests();
       void loadCoHosts();
+      // A recording may already be running (page refresh, co-host joining
+      // halfway) -- pick it up so nobody's UI lies about the lecture being
+      // unrecorded.
+      void resumeRecordingState();
       return newRoom;
     } catch (e: any) {
       console.error('Classroom connection failed:', e);
@@ -1295,6 +1332,145 @@ export const useClassroomStore = defineStore('classroom', () => {
     return true;
   }
 
+  // --- recording ---------------------------------------------------------
+
+  function stopRecordingClock() {
+    if (recordingClock) {
+      clearInterval(recordingClock);
+      recordingClock = null;
+    }
+  }
+
+  function stopRecordingPoll() {
+    if (recordingPoll) {
+      clearInterval(recordingPoll);
+      recordingPoll = null;
+    }
+  }
+
+  /**
+   * Fold one status answer into this client's view of the live recording.
+   *
+   * Going live starts a 1s tick for the REC timer and a 5s poll of the status
+   * route; finishing stops both and reloads the shelf, because the MP4 the
+   * worker just closed is now something the class can watch. Calling this
+   * again while live only refreshes the record -- the timers are started once.
+   */
+  function applyActiveRecording(doc: Recording) {
+    const live = !!doc.isLive;
+    const wasLive = !!activeRecording.value;
+
+    if (!live) {
+      activeRecording.value = null;
+      stopRecordingClock();
+      stopRecordingPoll();
+      if (wasLive) void loadRecordings();
+      return;
+    }
+
+    activeRecording.value = doc;
+    if (wasLive) return;
+
+    recordingSeconds.value = doc.startedAt
+      ? Math.max(0, Math.floor((Date.now() - new Date(doc.startedAt).getTime()) / 1000))
+      : 0;
+    recordingClock = setInterval(() => {
+      recordingSeconds.value += 1;
+    }, 1000);
+    recordingPoll = setInterval(async () => {
+      const sid = activeSessionId.value;
+      const id = activeRecording.value?.id;
+      if (!sid || !id) return;
+      try {
+        const fresh = await api.getDocument<Recording>(
+          `/api/v1/classrooms/sessions/${sid}/recordings/${id}/`
+        );
+        applyActiveRecording(fresh);
+      } catch {
+        // A dropped poll changes nothing: the server's row is still the truth
+        // and the next tick catches up.
+      }
+    }, 5000);
+  }
+
+  /** Everything recorded for this session, newest first -- the replay shelf. */
+  async function loadRecordings() {
+    const sid = activeSessionId.value;
+    if (!sid) return;
+    try {
+      const res = await api.getDocuments<Recording>(
+        `/api/v1/classrooms/sessions/${sid}/recordings/`
+      );
+      recordings.value = res.documents ?? [];
+    } catch (e) {
+      // Recordings switched off by an admin is a configuration, not a fault;
+      // the button that would call this is hidden in that case anyway.
+      if ((e as { code?: string })?.code !== 'FEATURE_DISABLED') {
+        console.warn('Could not load recordings:', e);
+      }
+    }
+  }
+
+  /**
+   * Re-attach to a recording that is already running: a host who refreshes
+   * mid-lecture, or a co-host who joins halfway through. Without this the
+   * server would keep writing an MP4 that nobody's UI knows about.
+   */
+  async function resumeRecordingState() {
+    await loadRecordings();
+    const live = recordings.value.find((r) => r.isLive) || null;
+    if (live) applyActiveRecording(live);
+  }
+
+  /** Ask the server to start recording this room (server-side MP4). */
+  async function startRecording(): Promise<boolean> {
+    const sid = activeSessionId.value;
+    if (!sid || isRecording.value) return false;
+    recordingError.value = null;
+    try {
+      const doc = await api.postDocument<Recording>(
+        `/api/v1/classrooms/sessions/${sid}/recordings/`,
+        {}
+      );
+      applyActiveRecording(doc);
+      void loadRecordings();
+      pushSystemMessage('Recording started. The video file is written on the server.');
+      return true;
+    } catch (e) {
+      // 503 RECORDING_UNAVAILABLE is the honest answer when the worker is
+      // down; the message says so rather than leaving a dead button.
+      recordingError.value = (e as { message?: string })?.message || 'Recording could not be started.';
+      pushSystemMessage(recordingError.value);
+      console.warn('Could not start recording:', e);
+      return false;
+    }
+  }
+
+  /**
+   * Finish the recording cleanly. Egress answers "ending" and finalises the
+   * MP4 a moment later, so this keeps polling until the file is whole.
+   */
+  async function stopRecording(): Promise<boolean> {
+    const sid = activeSessionId.value;
+    const id = activeRecording.value?.id;
+    if (!sid || !id) return false;
+    recordingError.value = null;
+    try {
+      const doc = await api.postDocument<Recording>(
+        `/api/v1/classrooms/sessions/${sid}/recordings/${id}/stop/`,
+        {}
+      );
+      applyActiveRecording(doc);
+      pushSystemMessage('Finishing the recording...');
+      return true;
+    } catch (e) {
+      recordingError.value = (e as { message?: string })?.message || 'The recording could not be stopped.';
+      pushSystemMessage(recordingError.value);
+      console.warn('Could not stop recording:', e);
+      return false;
+    }
+  }
+
   /**
    * Ask the host to use a medium that is closed to us.
    *
@@ -1398,6 +1574,14 @@ export const useClassroomStore = defineStore('classroom', () => {
     isCohost.value = false;
     coHostIds.value = [];
     joinRole = 'student';
+    // Leaving stops watching, never the recording itself: the MP4 belongs to
+    // the room, which outlives this tab (it finalises when the room closes).
+    stopRecordingClock();
+    stopRecordingPoll();
+    activeRecording.value = null;
+    recordingSeconds.value = 0;
+    recordingError.value = null;
+    recordings.value = [];
     isMutedAll.value = false;
     autoApproveMic.value = false;
     permissionPolicy.value = { mic: 'free', camera: 'free', screen: 'free' };
@@ -1432,6 +1616,11 @@ export const useClassroomStore = defineStore('classroom', () => {
     isModerator,
     isCohost,
     coHostIds,
+    recordings,
+    activeRecording,
+    recordingSeconds,
+    recordingError,
+    isRecording,
     isMutedAll,
     autoApproveMic,
     permissionPolicy,
@@ -1446,6 +1635,9 @@ export const useClassroomStore = defineStore('classroom', () => {
     loadCoHosts,
     addCohost,
     removeCohost,
+    loadRecordings,
+    startRecording,
+    stopRecording,
     requestPermission,
     reviewPermissionRequest,
     setAutoApproveMic,

@@ -79,6 +79,25 @@ interface PodiumApiService {
         @Path("userId") userId: String
     ): DocumentResponse<CoHostDto>
 
+    // ==================== RECORDINGS ====================
+    @GET("/api/v1/classrooms/sessions/{id}/recordings/")
+    suspend fun getRecordings(@Path("id") sessionId: String): DocumentsResponse<RecordingDto>
+
+    @POST("/api/v1/classrooms/sessions/{id}/recordings/")
+    suspend fun startRecording(@Path("id") sessionId: String): DocumentResponse<RecordingDto>
+
+    @GET("/api/v1/classrooms/sessions/{id}/recordings/{recordingId}/")
+    suspend fun getRecordingDetail(
+        @Path("id") sessionId: String,
+        @Path("recordingId") recordingId: String
+    ): DocumentResponse<RecordingDto>
+
+    @POST("/api/v1/classrooms/sessions/{id}/recordings/{recordingId}/stop/")
+    suspend fun stopRecording(
+        @Path("id") sessionId: String,
+        @Path("recordingId") recordingId: String
+    ): DocumentResponse<RecordingDto>
+
     // ==================== ATTENDANCE ====================
     @POST("/api/v1/attendance/join/")
     suspend fun registerAttendanceJoin(@Body request: AttendanceJoinRequest): DocumentResponse<Map<String, String>>

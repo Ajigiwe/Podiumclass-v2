@@ -196,6 +196,26 @@
               <span class="hidden sm:inline">Materials</span>
             </button>
 
+            <!-- Replay shelf: this session's recordings, for everyone in class -->
+            <button
+              v-if="recordingsEnabled"
+              @click="openRecordings"
+              class="h-8 sm:h-9 px-2.5 sm:px-3 text-[10px] font-bold uppercase tracking-widest text-slate-300 bg-white/5 hover:bg-white/10 border border-white/10 rounded-xl transition-all flex items-center gap-1.5 cursor-pointer"
+              title="Session recordings"
+            >
+              <i
+                class="fas fa-record-vinyl text-xs"
+                :class="classroomStore.isRecording ? 'text-red-400 animate-pulse' : ''"
+              ></i>
+              <span class="hidden sm:inline">Recordings</span>
+              <span
+                v-if="classroomStore.isRecording"
+                class="px-1.5 py-0.5 rounded text-[8px] bg-red-500/20 text-red-300 border border-red-500/30 tabular-nums"
+              >
+                {{ recTimer }}
+              </span>
+            </button>
+
             <!-- Lecturer: Automated Attendance Checker Manager -->
             <button
               v-if="canModerate"
@@ -258,6 +278,15 @@
                     :class="classroomStore.isMicEnabled ? 'bg-emerald-500 animate-pulse' : 'bg-slate-500'"
                   ></span>
                   {{ authStore.user?.fullName || 'User' }} ({{ isLecturer ? 'Host' : classroomStore.isCohost ? 'Co-host' : 'Participant' }})
+                </span>
+                <!-- Server-side recording in progress -->
+                <span
+                  v-if="classroomStore.isRecording"
+                  class="bg-red-600/95 backdrop-blur-md px-2.5 py-1 rounded-full text-[10px] font-black uppercase tracking-widest text-white flex items-center gap-1.5 border border-red-400/40"
+                  title="This session is being recorded on the server"
+                >
+                  <span class="w-2 h-2 rounded-full bg-white animate-pulse"></span>
+                  REC {{ recTimer }}
                 </span>
                 <span
                   v-if="classroomStore.isScreenSharing"
@@ -1393,6 +1422,97 @@
         </div>
       </div>
 
+      <!-- Session Recordings: the replay shelf. Every frame here was written
+           by the server (LiveKit Egress), and playback streams from the API. -->
+      <div
+        v-if="showRecordingsModal"
+        class="fixed inset-0 z-[600] flex items-center justify-center p-4 animate-fade-in"
+        @click.self="showRecordingsModal = false"
+      >
+        <div class="absolute inset-0 bg-black/90 backdrop-blur-md" />
+        <div class="relative w-full max-w-2xl bg-[#121217] border border-white/10 rounded-2xl flex flex-col max-h-[85vh] shadow-2xl overflow-hidden">
+          <div class="p-6 border-b border-white/5 flex items-center justify-between">
+            <div>
+              <h2 class="text-base font-black text-white uppercase tracking-tight">Session Recordings</h2>
+              <p class="text-[10px] text-slate-400 mt-0.5 uppercase tracking-widest font-bold">
+                {{ classroomStore.recordings.length }} Saved
+                <span v-if="classroomStore.isRecording" class="text-red-400">
+                  &bull; Recording {{ recTimer }}
+                </span>
+              </p>
+            </div>
+            <div class="flex items-center gap-2">
+              <button
+                @click="classroomStore.loadRecordings()"
+                class="p-2 text-slate-400 hover:text-indigo-400 bg-white/5 rounded-xl transition-all cursor-pointer"
+                title="Refresh"
+              >
+                <i class="fas fa-sync-alt"></i>
+              </button>
+              <button
+                @click="showRecordingsModal = false"
+                class="p-2 text-slate-400 hover:text-white bg-white/5 rounded-xl transition-all cursor-pointer"
+              >
+                <i class="fas fa-times"></i>
+              </button>
+            </div>
+          </div>
+
+          <p v-if="classroomStore.recordingError" class="px-6 pt-3 text-[11px] font-bold text-red-400">
+            {{ classroomStore.recordingError }}
+          </p>
+
+          <div class="p-6 overflow-y-auto space-y-4">
+            <div
+              v-for="rec in classroomStore.recordings"
+              :key="rec.id"
+              class="p-4 bg-white/5 border border-white/5 rounded-xl space-y-3"
+            >
+              <div class="flex items-center justify-between gap-3">
+                <div class="min-w-0">
+                  <p class="font-bold text-xs text-white truncate" :title="rec.title">{{ rec.title }}</p>
+                  <p class="text-[9px] font-bold text-slate-400 uppercase tracking-wider mt-0.5">
+                    {{ formatWhen(rec.startedAt) }}
+                    <template v-if="rec.durationSeconds != null"> &bull; {{ formatDuration(rec.durationSeconds) }}</template>
+                    <template v-if="rec.sizeBytes"> &bull; {{ formatSize(rec.sizeBytes) }}</template>
+                  </p>
+                </div>
+                <span
+                  class="px-2 py-1 rounded-lg text-[9px] font-black uppercase tracking-widest border shrink-0"
+                  :class="recordingStatusChip(rec).cls"
+                >
+                  {{ recordingStatusChip(rec).text }}
+                </span>
+              </div>
+
+              <video
+                v-if="rec.canPlay && rec.fileUrl"
+                :src="rec.fileUrl"
+                controls
+                preload="metadata"
+                class="w-full rounded-xl bg-black border border-white/10 max-h-[40vh]"
+              ></video>
+              <p
+                v-else-if="rec.status === 'failed' || rec.status === 'aborted'"
+                class="text-[11px] text-red-400 font-bold"
+              >
+                {{ rec.error || 'The recording did not finish.' }}
+              </p>
+              <p v-else class="text-[11px] text-slate-500 font-bold uppercase tracking-wider">
+                {{ rec.isLive ? 'Still recording\u2026' : 'Finalising the video file\u2026' }}
+              </p>
+            </div>
+
+            <p
+              v-if="!classroomStore.recordings.length"
+              class="text-[11px] text-slate-500 text-center py-8 uppercase tracking-widest font-bold"
+            >
+              No recordings for this session yet
+            </p>
+          </div>
+        </div>
+      </div>
+
       <!-- Share Invite Modal (Matching lite-lms ShareInviteModal) -->
       <div
         v-if="showShareModal"
@@ -1505,6 +1625,28 @@
           ></i>
         </button>
 
+        <!-- Record: server-side MP4, only when the feature is on -->
+        <template v-if="canRecord">
+          <span class="w-px h-5 bg-white/10"></span>
+          <button
+            @click="toggleRecording"
+            :class="[
+              'h-10 w-10 sm:h-11 sm:w-11 relative flex items-center justify-center rounded-xl transition-all duration-200 cursor-pointer',
+              classroomStore.isRecording
+                ? 'bg-red-600 text-white shadow-lg shadow-red-600/30'
+                : 'text-slate-400 hover:bg-white/5 hover:text-red-400'
+            ]"
+            :title="classroomStore.isRecording ? 'Stop recording' : 'Record this session'"
+          >
+            <i v-if="classroomStore.isRecording" class="fas fa-stop text-sm"></i>
+            <i v-else class="fas fa-circle text-[11px] text-red-500"></i>
+            <span
+              v-if="classroomStore.isRecording"
+              class="absolute -top-1 -right-1 w-2.5 h-2.5 rounded-full bg-red-400 border-2 border-neutral-900 animate-pulse"
+            ></span>
+          </button>
+        </template>
+
         <!-- Merged Reactions & Raise Hand (Google Meet style) -->
         <div class="relative">
           <button
@@ -1590,6 +1732,7 @@ import { ref, computed, watch, onMounted, onUnmounted, nextTick } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { useClassroomStore, type MediaKind } from '../stores/classroom';
 import { useAuthStore } from '../stores/auth';
+import { useFeaturesStore } from '../stores/features';
 import { api } from '../api/client';
 import RoomModeration from '../components/RoomModeration.vue';
 
@@ -1597,6 +1740,7 @@ const route = useRoute();
 const router = useRouter();
 const classroomStore = useClassroomStore();
 const authStore = useAuthStore();
+const featuresStore = useFeaturesStore();
 
 const sessionId = route.params.id as string;
 const sessionData = ref<any>(null);
@@ -1612,6 +1756,7 @@ const insufficientBalance = ref<{ needed: number; have: number } | null>(null);
 const showChat = ref(false);
 const showParticipants = ref(false);
 const showMaterialsModal = ref(false);
+const showRecordingsModal = ref(false);
 const showShareModal = ref(false);
 const showReactions = ref(false);
 
@@ -2042,6 +2187,66 @@ async function toggleCohost(p: RosterRow) {
   } else {
     await classroomStore.addCohost(p.identity);
   }
+}
+
+// --- recording ------------------------------------------------------------
+//
+// The MP4 is written by the server (LiveKit Egress). Everything below only
+// asks it to start, stop or report -- this client can no more create a
+// recording than it can invent an attendance record.
+
+/** Whoever may moderate the room may record it, but only if recording is on. */
+const canRecord = computed(() => canModerate.value && featuresStore.isEnabled('recordings'));
+
+/** Replays are for everyone: writing them down is only worth it if people can watch. */
+const recordingsEnabled = computed(() => featuresStore.isEnabled('recordings'));
+
+/** Elapsed time for the REC chip, ticking off the store's live clock. */
+const recTimer = computed(() => {
+  const total = classroomStore.recordingSeconds;
+  const h = Math.floor(total / 3600);
+  const m = Math.floor((total % 3600) / 60);
+  const s = total % 60;
+  const mm = String(m).padStart(2, '0');
+  const ss = String(s).padStart(2, '0');
+  return h > 0 ? `${h}:${mm}:${ss}` : `${mm}:${ss}`;
+});
+
+async function toggleRecording() {
+  if (classroomStore.isRecording) {
+    await classroomStore.stopRecording();
+  } else {
+    await classroomStore.startRecording();
+  }
+}
+
+function openRecordings() {
+  showRecordingsModal.value = true;
+  void classroomStore.loadRecordings();
+}
+
+function formatDuration(seconds: number | null) {
+  if (seconds == null) return '—';
+  const m = Math.floor(seconds / 60);
+  const s = seconds % 60;
+  return `${m}:${String(s).padStart(2, '0')}`;
+}
+
+function formatSize(bytes: number | null) {
+  if (bytes == null) return '';
+  if (bytes < 1024 * 1024) return `${Math.max(1, Math.round(bytes / 1024))} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function formatWhen(iso: string | null) {
+  if (!iso) return '';
+  return new Date(iso).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' });
+}
+
+function recordingStatusChip(r: { status: string; error?: string | null }) {
+  if (r.status === 'complete') return { text: 'Ready', cls: 'text-emerald-400 bg-emerald-500/10 border-emerald-400/30' };
+  if (r.status === 'failed' || r.status === 'aborted') return { text: 'Failed', cls: 'text-red-400 bg-red-500/10 border-red-400/30' };
+  return { text: 'Processing', cls: 'text-amber-400 bg-amber-500/10 border-amber-400/30' };
 }
 
 // Watch incoming verification broadcasted over LiveKit Data Channel

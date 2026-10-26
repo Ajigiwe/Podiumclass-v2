@@ -112,6 +112,22 @@ data class AppointCoHostRequest(
 )
 
 @Serializable
+data class RecordingDto(
+    val id: String,
+    val sessionId: String,
+    val title: String? = null,
+    val status: String = "starting",
+    val isLive: Boolean = false,
+    val canPlay: Boolean = false,
+    val error: String? = null,
+    val startedAt: String? = null,
+    val endedAt: String? = null,
+    val durationSeconds: Int? = null,
+    val sizeBytes: Long? = null,
+    val fileUrl: String? = null
+)
+
+@Serializable
 data class SessionDto(
     val id: String,
     val title: String,

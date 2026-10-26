@@ -308,3 +308,24 @@ LIVEKIT_API_KEY = env_secret('LIVEKIT_API_KEY', 'dev-only-livekit-key')
 LIVEKIT_API_SECRET = env_secret('LIVEKIT_API_SECRET', 'dev-only-livekit-secret')
 # WebSocket URL clients use to join rooms (defaults to self-hosted local server)
 LIVEKIT_URL = os.getenv('LIVEKIT_URL', 'ws://localhost:7880')
+
+# LiveKit Egress: server-side recording. The worker is its own container
+# (scripts/start_egress.ps1) and nothing in this project records from a
+# browser. Calls go to the LiveKit *server*, which exposes the
+# `/twirp/livekit.Egress/*` API and forwards each request to a worker over
+# Redis -- there is no separate egress API port to reach (its own HTTP ports
+# are health/template/metrics only). When no worker is running, or Redis is
+# down, every recording call fails closed with 503 instead of pretending the
+# lecture was captured; set this to an empty string to switch recording off at
+# the transport level as well as the feature flag.
+LIVEKIT_EGRESS_URL = os.getenv('LIVEKIT_EGRESS_URL', LIVEKIT_API_URL)
+
+# Where MP4s land on this machine. The egress container mounts the same
+# directory at RECORDINGS_CONTAINER_PATH, so a path handed to the worker and a
+# path read back here refer to one file. Recording rows store only the
+# basename, which keeps the two sides from drifting apart (and stops a stored
+# path from ever pointing outside the root).
+RECORDINGS_ROOT = Path(
+    os.getenv('RECORDINGS_ROOT', str(BASE_DIR.parent / '.livekit' / 'recordings'))
+).resolve()
+RECORDINGS_CONTAINER_PATH = os.getenv('RECORDINGS_CONTAINER_PATH', '/out/recordings')
