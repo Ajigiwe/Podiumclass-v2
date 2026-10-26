@@ -57,7 +57,9 @@ fun LoginScreen(
     errorMessage: String? = null,
     onGoogleLogin: () -> Unit,
     onGoogleTokenReceived: (String) -> Unit = {},
-    onSaveApiUrl: (String) -> Unit
+    onSaveApiUrl: (String) -> Unit,
+    showWebOAuth: Boolean = false,
+    onWebOAuthDismiss: () -> Unit = {}
 ) {
     var showUrlDialog by remember { mutableStateOf(false) }
     var showOAuthDialog by remember { mutableStateOf(false) }
@@ -334,11 +336,15 @@ fun LoginScreen(
         }
 
         // In-App Google OAuth Sign-In Web Sheet
-        if (showOAuthDialog) {
+        if (showOAuthDialog || showWebOAuth) {
             GoogleOAuthDialog(
-                onDismiss = { showOAuthDialog = false },
+                onDismiss = {
+                    showOAuthDialog = false
+                    onWebOAuthDismiss()
+                },
                 onTokenReceived = { token ->
                     showOAuthDialog = false
+                    onWebOAuthDismiss()
                     onGoogleTokenReceived(token)
                 }
             )

@@ -62,6 +62,7 @@ class MainActivity : ComponentActivity() {
                     var isLoadingSessions by remember { mutableStateOf(false) }
                     var isAuthLoading by remember { mutableStateOf(false) }
                     var authError by remember { mutableStateOf<String?>(null) }
+                    var showWebOAuthDialog by remember { mutableStateOf(false) }
 
                     fun loadSessions() {
                         scope.launch {
@@ -154,22 +155,26 @@ class MainActivity : ComponentActivity() {
                                 currentApiUrl = apiUrl,
                                 isLoading = isAuthLoading,
                                 errorMessage = authError,
+                                showWebOAuth = showWebOAuthDialog,
+                                onWebOAuthDismiss = { showWebOAuthDialog = false },
                                 onGoogleLogin = {
                                     scope.launch {
                                         try {
                                             isAuthLoading = true
+                                            authError = null
                                             val googleToken = performGoogleSignIn(this@MainActivity)
                                             if (!googleToken.isNullOrBlank()) {
                                                 executeLogin(GoogleLoginRequest(credential = googleToken))
                                             } else {
                                                 isAuthLoading = false
-                                                authError = "Google Account not selected. Tap 'Sign in via Google Web Portal' below."
+                                                showWebOAuthDialog = true
                                             }
                                         } catch (e: GetCredentialCancellationException) {
                                             isAuthLoading = false
                                         } catch (e: Exception) {
                                             isAuthLoading = false
-                                            authError = "Google Sign-In: ${e.localizedMessage ?: e.message}. Tap 'Sign in via Google Web Portal' below."
+                                            authError = null
+                                            showWebOAuthDialog = true
                                         }
                                     }
                                 },
