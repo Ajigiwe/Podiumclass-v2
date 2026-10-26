@@ -61,6 +61,18 @@ class TokenStorage(private val context: Context) {
         return context.dataStore.data.first()[KEY_JWT_TOKEN]
     }
 
+    suspend fun getUserName(): String? {
+        return context.dataStore.data.first()[KEY_USER_NAME]
+    }
+
+    suspend fun getUserId(): String? {
+        return context.dataStore.data.first()[KEY_USER_ID]
+    }
+
+    suspend fun getUserRole(): String? {
+        return context.dataStore.data.first()[KEY_USER_ROLE]
+    }
+
     suspend fun getApiUrl(): String {
         return context.dataStore.data.first()[KEY_API_URL] ?: "http://10.0.2.2:8000"
     }

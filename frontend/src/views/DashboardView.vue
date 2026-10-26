@@ -65,7 +65,7 @@
     </div>
 
     <!-- Stat Cards -->
-    <div class="grid grid-cols-2 lg:grid-cols-4 gap-4">
+    <div class="grid grid-cols-2 gap-4">
       <!-- Enrolled -->
       <div class="bg-white dark:bg-slate-900 rounded-xl p-5 border border-[#DDE0F0] dark:border-slate-800 stat-glow-blue cursor-pointer card-hover group">
         <div class="flex items-center gap-3 mb-3">
@@ -89,41 +89,6 @@
         </div>
         <div class="text-3xl font-bold text-[#0D0D1A] dark:text-white tracking-tight tabular-nums">
           {{ hostedCount }}
-        </div>
-      </div>
-
-      <!-- Wallet Balance -->
-      <router-link
-        to="/wallet"
-        class="bg-white dark:bg-slate-900 rounded-xl p-5 border border-[#DDE0F0] dark:border-slate-800 stat-glow-green cursor-pointer card-hover group block"
-      >
-        <div class="flex items-center gap-3 mb-3">
-          <div class="w-10 h-10 rounded-lg bg-green-50 dark:bg-green-900/20 flex items-center justify-center text-green-600">
-            <i class="fas fa-wallet text-sm"></i>
-          </div>
-          <span class="text-[11px] font-bold text-[#8888A8] uppercase tracking-widest">Wallet</span>
-          <span class="ml-auto w-7 h-7 rounded-lg flex items-center justify-center text-[#8888A8] hover:bg-green-50 hover:text-green-600 transition-all">
-            <i class="fas fa-sync-alt text-[10px]"></i>
-          </span>
-        </div>
-        <div class="text-2xl font-bold text-[#0D0D1A] dark:text-white tracking-tight tabular-nums">
-          {{ authStore.formattedBalance }}
-        </div>
-        <p class="text-[11px] text-green-600 font-semibold mt-2 opacity-0 group-hover:opacity-100 transition-all">
-          Top up <i class="fas fa-arrow-right text-[9px]"></i>
-        </p>
-      </router-link>
-
-      <!-- Sessions -->
-      <div class="bg-white dark:bg-slate-900 rounded-xl p-5 border border-[#DDE0F0] dark:border-slate-800 stat-glow-emerald">
-        <div class="flex items-center gap-3 mb-3">
-          <div class="w-10 h-10 rounded-lg bg-emerald-50 dark:bg-emerald-900/20 flex items-center justify-center text-emerald-600">
-            <i class="fas fa-clipboard-check text-sm"></i>
-          </div>
-          <span class="text-[11px] font-bold text-[#8888A8] uppercase tracking-widest">Sessions</span>
-        </div>
-        <div class="text-3xl font-bold text-[#0D0D1A] dark:text-white tracking-tight tabular-nums">
-          {{ sessions.length }}
         </div>
       </div>
     </div>

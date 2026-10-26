@@ -63,16 +63,16 @@ fun DashboardScreen(
     }
 
     val liveSessions = remember(sessions) {
-        sessions.filter { it.status.equals("active", ignoreCase = true) || it.isLive }
+        sessions.filter { it.status.equals("active", ignoreCase = true) || it.is_active }
     }
 
     val hostedCount = remember(sessions, isLecturer) {
-        sessions.count { it.isLecturer || isLecturer }
+        if (isLecturer) sessions.size else 0
     }
 
-    val filteredSessions = remember(sessions, activeTab) {
+    val filteredSessions = remember(sessions, activeTab, isLecturer) {
         if (activeTab == "hosted") {
-            sessions.filter { it.isLecturer }
+            if (isLecturer) sessions else emptyList()
         } else {
             sessions
         }
@@ -346,60 +346,31 @@ fun DashboardScreen(
                 }
             }
 
-            // 4. 4 Stat Cards in 2x2 Grid (Mirroring DashboardView.vue lines 68-129)
+            // 4. Stat Cards (Enrolled & Hosted)
             item {
-                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Row(
-                        horizontalArrangement = Arrangement.spacedBy(10.dp),
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        // Card 1: Enrolled
-                        StatCard(
-                            title = "ENROLLED",
-                            value = "${sessions.size}",
-                            icon = Icons.Default.School,
-                            iconColor = Color(0xFF3B82F6),
-                            iconBg = Color(0xFF1E3A8A).copy(alpha = 0.3f),
-                            modifier = Modifier.weight(1f)
-                        )
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    // Card 1: Enrolled
+                    StatCard(
+                        title = "ENROLLED",
+                        value = "${sessions.size}",
+                        icon = Icons.Default.School,
+                        iconColor = Color(0xFF3B82F6),
+                        iconBg = Color(0xFF1E3A8A).copy(alpha = 0.3f),
+                        modifier = Modifier.weight(1f)
+                    )
 
-                        // Card 2: Hosted
-                        StatCard(
-                            title = "HOSTED",
-                            value = "$hostedCount",
-                            icon = Icons.Default.CastForEducation,
-                            iconColor = Color(0xFFF59E0B),
-                            iconBg = Color(0xFF78350F).copy(alpha = 0.3f),
-                            modifier = Modifier.weight(1f)
-                        )
-                    }
-
-                    Row(
-                        horizontalArrangement = Arrangement.spacedBy(10.dp),
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        // Card 3: Wallet
-                        StatCard(
-                            title = "WALLET",
-                            value = "GHS ${(walletBalance / 100.0).formatDec()}",
-                            icon = Icons.Default.AccountBalanceWallet,
-                            iconColor = Color(0xFF10B981),
-                            iconBg = Color(0xFF064E3B).copy(alpha = 0.3f),
-                            subtext = "Top up →",
-                            onClick = { showWalletModal = true },
-                            modifier = Modifier.weight(1f)
-                        )
-
-                        // Card 4: Sessions
-                        StatCard(
-                            title = "SESSIONS",
-                            value = "${sessions.size}",
-                            icon = Icons.Default.AssignmentTurnedIn,
-                            iconColor = Color(0xFF14B8A6),
-                            iconBg = Color(0xFF134E4A).copy(alpha = 0.3f),
-                            modifier = Modifier.weight(1f)
-                        )
-                    }
+                    // Card 2: Hosted
+                    StatCard(
+                        title = "HOSTED",
+                        value = "$hostedCount",
+                        icon = Icons.Default.CastForEducation,
+                        iconColor = Color(0xFFF59E0B),
+                        iconBg = Color(0xFF78350F).copy(alpha = 0.3f),
+                        modifier = Modifier.weight(1f)
+                    )
                 }
             }
 
@@ -699,7 +670,7 @@ fun SessionItemCard(
     session: SessionDto,
     onClick: () -> Unit
 ) {
-    val isLive = session.status.equals("active", ignoreCase = true) || session.isLive
+    val isLive = session.status.equals("active", ignoreCase = true) || session.is_active
 
     Card(
         shape = RoundedCornerShape(12.dp),
@@ -925,7 +896,7 @@ fun CreateClassDialog(
                                 CreateSessionRequest(
                                     title = title.trim(),
                                     course = course.trim().ifEmpty { "General" },
-                                    autoAttendanceSettings = autoSettings
+                                    autoAttendanceSettings = autoSettings ?: AutoAttendanceSettingsDto(enabled = false)
                                 )
                             )
                         }
