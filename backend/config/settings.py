@@ -131,6 +131,8 @@ if not ALLOWED_HOSTS:
             "ALLOWED_HOSTS must list the public hostname(s) when DJANGO_DEBUG is off, "
             "e.g. ALLOWED_HOSTS=api.example.com"
         )
+elif DEBUG and '*' not in ALLOWED_HOSTS:
+    ALLOWED_HOSTS = list(set(ALLOWED_HOSTS + ['*']))
 
 # Application definition
 INSTALLED_APPS = [

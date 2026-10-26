@@ -183,7 +183,11 @@ class ClassroomViewModel(
             val tokenRes = client.getLiveKitToken(sessionId)
             val tokenData = tokenRes.document
             var livekitUrl = tokenData.livekitUrl ?: "ws://10.0.2.2:7880"
-            if (livekitUrl.contains("localhost")) {
+            val currentApiUrl = tokenStorage.getApiUrl()
+            val apiHost = try { java.net.URI(currentApiUrl).host } catch (e: Exception) { null }
+            if (livekitUrl.contains("localhost") && !apiHost.isNullOrBlank()) {
+                livekitUrl = livekitUrl.replace("localhost", apiHost)
+            } else if (livekitUrl.contains("localhost")) {
                 livekitUrl = livekitUrl.replace("localhost", "10.0.2.2")
             }
 

@@ -74,8 +74,11 @@ dependencies {
     implementation(libs.okhttp.logging)
     implementation(libs.kotlinx.serialization.json)
 
-    // Coroutines & DataStore
+    // Coroutines & DataStore & Credentials
     implementation(libs.kotlinx.coroutines.core)
     implementation(libs.kotlinx.coroutines.android)
     implementation(libs.androidx.datastore.preferences)
+    implementation(libs.credentials.core)
+    implementation(libs.credentials.play)
+    implementation(libs.google.id)
 }
