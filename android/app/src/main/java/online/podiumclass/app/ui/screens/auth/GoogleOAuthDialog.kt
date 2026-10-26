@@ -25,7 +25,7 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 
 private const val GOOGLE_CLIENT_ID = "148808386481-qp65l50jmuabfte437aafmh85esth944.apps.googleusercontent.com"
-private const val REDIRECT_URI = "https://lite-class.firebaseapp.com/__/auth/handler"
+private const val REDIRECT_URI = "http://localhost:3000/api/auth/callback/google"
 private const val CHROME_USER_AGENT = "Mozilla/5.0 (Linux; Android 14; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Mobile Safari/537.36"
 
 @SuppressLint("SetJavaScriptEnabled")
@@ -134,18 +134,22 @@ fun GoogleOAuthDialog(
 
                                     private fun checkRedirect(url: String): Boolean {
                                         if (url.startsWith(REDIRECT_URI)) {
-                                            // Extract access_token from fragment #access_token=ya29...
-                                            val fragment = Uri.parse(url).fragment
+                                            val uri = Uri.parse(url)
+                                            val fragment = uri.fragment
+                                            var accessToken: String? = null
                                             if (!fragment.isNullOrBlank()) {
                                                 val params = fragment.split("&").associate {
                                                     val parts = it.split("=")
                                                     if (parts.size >= 2) parts[0] to parts[1] else parts[0] to ""
                                                 }
-                                                val accessToken = params["access_token"]
-                                                if (!accessToken.isNullOrBlank()) {
-                                                    onTokenReceived(accessToken)
-                                                    return true
-                                                }
+                                                accessToken = params["access_token"]
+                                            }
+                                            if (accessToken.isNullOrBlank()) {
+                                                accessToken = uri.getQueryParameter("access_token")
+                                            }
+                                            if (!accessToken.isNullOrBlank()) {
+                                                onTokenReceived(accessToken)
+                                                return true
                                             }
                                         }
                                         return false
