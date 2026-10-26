@@ -4,6 +4,10 @@ import android.app.Activity
 import android.app.PictureInPictureParams
 import android.os.Build
 import android.util.Rational
+import android.content.pm.PackageManager
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.core.content.ContextCompat
 import androidx.compose.animation.*
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -48,6 +52,28 @@ fun ClassroomScreen(
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
+
+    val permissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions()
+    ) { permissions ->
+        val micGranted = permissions[android.Manifest.permission.RECORD_AUDIO] ?: false
+        val camGranted = permissions[android.Manifest.permission.CAMERA] ?: false
+        if (micGranted) {
+            scope.launch { viewModel.roomManager.setMicEnabled(true) }
+        }
+        if (camGranted) {
+            scope.launch { viewModel.roomManager.setCameraEnabled(true) }
+        }
+    }
+
+    LaunchedEffect(Unit) {
+        permissionLauncher.launch(
+            arrayOf(
+                android.Manifest.permission.RECORD_AUDIO,
+                android.Manifest.permission.CAMERA
+            )
+        )
+    }
 
     val session by viewModel.session.collectAsState()
     val isLoading by viewModel.isLoading.collectAsState()
@@ -258,6 +284,7 @@ fun ClassroomScreen(
                                 participant = spotlightParticipant,
                                 isSpotlight = true,
                                 onPinClick = { viewModel.pinParticipant(spotlightParticipant.identity) },
+                                initRenderer = { viewModel.initVideoRenderer(it) },
                                 modifier = Modifier.fillMaxSize()
                             )
                         } else {
@@ -273,6 +300,7 @@ fun ClassroomScreen(
                                         participant = p,
                                         isSpotlight = false,
                                         onPinClick = { viewModel.pinParticipant(p.identity) },
+                                        initRenderer = { viewModel.initVideoRenderer(it) },
                                         modifier = Modifier
                                             .fillMaxWidth()
                                             .height(if (participants.size <= 2) 260.dp else 180.dp)
@@ -299,10 +327,25 @@ fun ClassroomScreen(
                             isMicRequested = requestedKinds["mic"] == true,
                             isCameraRequested = requestedKinds["camera"] == true,
                             pendingModerationRequests = pendingRequests.size,
-                            onToggleMic = { scope.launch { viewModel.roomManager.toggleMic() } },
-                            onToggleCamera = { scope.launch { viewModel.roomManager.toggleCamera() } },
+                            onToggleMic = {
+                                if (ContextCompat.checkSelfPermission(context, android.Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
+                                    scope.launch { viewModel.roomManager.toggleMic() }
+                                } else {
+                                    permissionLauncher.launch(arrayOf(android.Manifest.permission.RECORD_AUDIO))
+                                }
+                            },
+                            onToggleCamera = {
+                                if (ContextCompat.checkSelfPermission(context, android.Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED) {
+                                    scope.launch { viewModel.roomManager.toggleCamera() }
+                                } else {
+                                    permissionLauncher.launch(arrayOf(android.Manifest.permission.CAMERA))
+                                }
+                            },
                             onFlipCamera = { scope.launch { viewModel.roomManager.flipCamera() } },
-                            onToggleHand = { scope.launch { viewModel.roomManager.toggleHandRaise("Mobile User") } },
+                            onToggleHand = {
+                                val localName = participants.find { it.isLocal }?.name ?: "Student"
+                                scope.launch { viewModel.roomManager.toggleHandRaise(localName) }
+                            },
                             onSendReaction = { emoji -> scope.launch { viewModel.roomManager.sendReaction(emoji) } },
                             onToggleChat = { showChatDrawer = !showChatDrawer },
                             onOpenModeration = { showModerationModal = true },

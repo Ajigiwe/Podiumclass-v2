@@ -31,6 +31,7 @@ androidx-compose-ui-tooling-preview = { group = "androidx.compose.ui", name = "u
 androidx-compose-material3 = { group = "androidx.compose.material3", name = "material3" }
 androidx-compose-material-icons = { group = "androidx.compose.material", name = "material-icons-extended", version.ref = "materialIconsExtended" }
 androidx-navigation-compose = { group = "androidx.navigation", name = "navigation-compose", version.ref = "navigationCompose" }
+androidx-browser = { group = "androidx.browser", name = "browser", version = "1.8.0" }
 
 # LiveKit WebRTC SDK
 livekit-android = { group = "io.livekit", name = "livekit-android", version.ref = "livekit" }

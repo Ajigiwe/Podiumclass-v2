@@ -56,10 +56,11 @@ fun LoginScreen(
     isLoading: Boolean,
     errorMessage: String? = null,
     onGoogleLogin: () -> Unit,
-    onDevLogin: (String) -> Unit = {},
+    onGoogleTokenReceived: (String) -> Unit = {},
     onSaveApiUrl: (String) -> Unit
 ) {
     var showUrlDialog by remember { mutableStateOf(false) }
+    var showOAuthDialog by remember { mutableStateOf(false) }
     var urlInput by remember { mutableStateOf(currentApiUrl) }
 
     LaunchedEffect(currentApiUrl) {
@@ -234,43 +235,20 @@ fun LoginScreen(
 
                     Spacer(modifier = Modifier.height(16.dp))
 
-                    // Development / Local Test Quick Access
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    // Institutional Browser Sign-In Alternative
+                    TextButton(
+                        onClick = { showOAuthDialog = true },
+                        enabled = !isLoading
                     ) {
-                        OutlinedButton(
-                            onClick = { onDevLogin("student") },
-                            enabled = !isLoading,
-                            modifier = Modifier
-                                .weight(1f)
-                                .height(38.dp),
-                            shape = RoundedCornerShape(8.dp),
-                            border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF334155)),
-                            colors = ButtonDefaults.outlinedButtonColors(
-                                contentColor = Color(0xFF94A3B8)
-                            )
-                        ) {
-                            Text("Test Student", fontSize = 11.sp, fontWeight = FontWeight.Medium)
-                        }
-
-                        OutlinedButton(
-                            onClick = { onDevLogin("admin") },
-                            enabled = !isLoading,
-                            modifier = Modifier
-                                .weight(1f)
-                                .height(38.dp),
-                            shape = RoundedCornerShape(8.dp),
-                            border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF334155)),
-                            colors = ButtonDefaults.outlinedButtonColors(
-                                contentColor = Color(0xFF94A3B8)
-                            )
-                        ) {
-                            Text("Test Admin", fontSize = 11.sp, fontWeight = FontWeight.Medium)
-                        }
+                        Text(
+                            text = "Sign in via Google Web Portal",
+                            color = Color(0xFF60A5FA),
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Medium
+                        )
                     }
 
-                    Spacer(modifier = Modifier.height(24.dp))
+                    Spacer(modifier = Modifier.height(16.dp))
 
                     // Card Footnote
                     Row(
@@ -352,6 +330,17 @@ fun LoginScreen(
                     }
                 },
                 containerColor = SurfaceDark
+            )
+        }
+
+        // In-App Google OAuth Sign-In Web Sheet
+        if (showOAuthDialog) {
+            GoogleOAuthDialog(
+                onDismiss = { showOAuthDialog = false },
+                onTokenReceived = { token ->
+                    showOAuthDialog = false
+                    onGoogleTokenReceived(token)
+                }
             )
         }
     }

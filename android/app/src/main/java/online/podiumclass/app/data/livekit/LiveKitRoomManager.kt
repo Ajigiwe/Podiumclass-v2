@@ -1,8 +1,10 @@
 package online.podiumclass.app.data.livekit
 
 import android.content.Context
+import android.media.AudioManager
 import io.livekit.android.LiveKit
 import io.livekit.android.events.RoomEvent
+import io.livekit.android.renderer.TextureViewRenderer
 import io.livekit.android.room.Room
 import io.livekit.android.room.participant.Participant
 import io.livekit.android.room.participant.RemoteParticipant
@@ -89,9 +91,28 @@ class LiveKitRoomManager(private val context: Context) {
         updateParticipantsRoster()
     }
 
+    fun initVideoRenderer(view: TextureViewRenderer) {
+        try {
+            room?.initVideoRenderer(view)
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+    }
+
     suspend fun connect(url: String, token: String, localName: String, localRole: String) {
         val newRoom = LiveKit.create(context)
         room = newRoom
+
+        // Configure audio for communications loudspeaker
+        try {
+            val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as? AudioManager
+            audioManager?.let {
+                it.mode = AudioManager.MODE_IN_COMMUNICATION
+                it.isSpeakerphoneOn = true
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
 
         scope.launch {
             newRoom.events.events.collect { event ->
@@ -270,9 +291,10 @@ class LiveKitRoomManager(private val context: Context) {
     suspend fun flipCamera() {
         val r = room ?: return
         val localVideo = r.localParticipant.videoTrackPublications.firstOrNull()?.second as? LocalVideoTrack
-        // Switch position
-        localVideo?.let {
-            // LiveKit SDK handles camera options
+        try {
+            localVideo?.switchCamera()
+        } catch (e: Exception) {
+            e.printStackTrace()
         }
     }
 
@@ -370,6 +392,16 @@ class LiveKitRoomManager(private val context: Context) {
     }
 
     suspend fun disconnect() {
+        try {
+            val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as? AudioManager
+            audioManager?.let {
+                it.isSpeakerphoneOn = false
+                it.mode = AudioManager.MODE_NORMAL
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+
         room?.disconnect()
         room = null
         _isConnected.value = false

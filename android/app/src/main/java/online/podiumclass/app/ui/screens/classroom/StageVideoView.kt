@@ -33,6 +33,7 @@ fun StageVideoView(
     participant: ParticipantTileState,
     isSpotlight: Boolean = false,
     onPinClick: () -> Unit = {},
+    initRenderer: (TextureViewRenderer) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val borderColor = when {
@@ -56,11 +57,21 @@ fun StageVideoView(
             AndroidView(
                 factory = { context ->
                     TextureViewRenderer(context).apply {
+                        initRenderer(this)
                         participant.videoTrack.addRenderer(this)
                     }
                 },
                 update = { view ->
+                    initRenderer(view)
                     participant.videoTrack.addRenderer(view)
+                },
+                onRelease = { view ->
+                    try {
+                        participant.videoTrack.removeRenderer(view)
+                        view.release()
+                    } catch (e: Exception) {
+                        e.printStackTrace()
+                    }
                 },
                 modifier = Modifier.fillMaxSize()
             )

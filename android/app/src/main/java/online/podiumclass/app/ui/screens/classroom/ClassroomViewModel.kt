@@ -191,10 +191,11 @@ class ClassroomViewModel(
                 livekitUrl = livekitUrl.replace("localhost", "10.0.2.2")
             }
 
+            val localName = tokenStorage.getUserName() ?: "Mobile User"
             roomManager.connect(
                 url = livekitUrl,
                 token = tokenData.token,
-                localName = "Mobile User",
+                localName = localName,
                 localRole = _currentUserRole.value
             )
 
@@ -651,6 +652,10 @@ class ClassroomViewModel(
                 role = _currentUserRole.value
             )
         }
+    }
+
+    fun initVideoRenderer(view: io.livekit.android.renderer.TextureViewRenderer) {
+        roomManager.initVideoRenderer(view)
     }
 
     override fun onCleared() {

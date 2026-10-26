@@ -55,6 +55,7 @@ class MainActivity : ComponentActivity() {
 
                     val token by tokenStorage.tokenFlow.collectAsState(initial = null)
                     val role by tokenStorage.roleFlow.collectAsState(initial = "student")
+                    val userName by tokenStorage.nameFlow.collectAsState(initial = "User")
                     val apiUrl by tokenStorage.apiUrlFlow.collectAsState(initial = "http://10.0.2.2:8000")
 
                     var sessions by remember { mutableStateOf<List<SessionDto>>(emptyList()) }
@@ -155,26 +156,26 @@ class MainActivity : ComponentActivity() {
                                 errorMessage = authError,
                                 onGoogleLogin = {
                                     scope.launch {
-                                        var googleToken: String? = null
                                         try {
-                                            googleToken = performGoogleSignIn(this@MainActivity)
+                                            isAuthLoading = true
+                                            val googleToken = performGoogleSignIn(this@MainActivity)
+                                            if (!googleToken.isNullOrBlank()) {
+                                                executeLogin(GoogleLoginRequest(credential = googleToken))
+                                            } else {
+                                                isAuthLoading = false
+                                                authError = "Google Account not selected. Tap 'Sign in via Google Web Portal' below."
+                                            }
                                         } catch (e: GetCredentialCancellationException) {
-                                            return@launch
+                                            isAuthLoading = false
                                         } catch (e: Exception) {
-                                            e.printStackTrace()
+                                            isAuthLoading = false
+                                            authError = "Google Sign-In: ${e.localizedMessage ?: e.message}. Tap 'Sign in via Google Web Portal' below."
                                         }
-
-                                        val req = if (!googleToken.isNullOrBlank()) {
-                                            GoogleLoginRequest(credential = googleToken)
-                                        } else {
-                                            GoogleLoginRequest(dev_login = true, role = "student")
-                                        }
-                                        executeLogin(req)
                                     }
                                 },
-                                onDevLogin = { role ->
+                                onGoogleTokenReceived = { accessToken ->
                                     scope.launch {
-                                        executeLogin(GoogleLoginRequest(dev_login = true, role = role))
+                                        executeLogin(GoogleLoginRequest(access_token = accessToken))
                                     }
                                 },
                                 onSaveApiUrl = { newUrl ->
@@ -192,6 +193,7 @@ class MainActivity : ComponentActivity() {
                                 sessions = sessions,
                                 isLoading = isLoadingSessions,
                                 isLecturer = role == "lecturer" || role == "admin",
+                                userName = userName,
                                 onJoinClass = { sessionId ->
                                     navController.navigate("classroom/$sessionId")
                                 },

@@ -28,6 +28,10 @@ class TokenStorage(private val context: Context) {
         prefs[KEY_USER_ROLE] ?: "student"
     }
 
+    val nameFlow: Flow<String> = context.dataStore.data.map { prefs ->
+        prefs[KEY_USER_NAME] ?: "User"
+    }
+
     val userIdFlow: Flow<String?> = context.dataStore.data.map { prefs ->
         prefs[KEY_USER_ID]
     }
