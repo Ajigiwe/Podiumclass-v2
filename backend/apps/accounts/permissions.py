@@ -14,8 +14,22 @@ _LECTURER_ROLES = {ROLE_LECTURER, ROLE_ADMIN}
 
 
 def is_lecturer(user) -> bool:
-    """True for lecturer or admin, i.e. anyone who may host a class."""
-    return bool(user and getattr(user, "is_authenticated", False) and user.role in _LECTURER_ROLES)
+    """
+    True for lecturer or admin, i.e. anyone who may host a class.
+
+    An admin can also grant the ability to one account through
+    ``can_create_classes`` without promoting it to lecturer. That grant is
+    additive, so revoking it takes effect on the user's next request (the flag
+    is read from the database, never from the token).
+    """
+    return bool(
+        user
+        and getattr(user, "is_authenticated", False)
+        and (
+            user.role in _LECTURER_ROLES
+            or getattr(user, "can_create_classes", False)
+        )
+    )
 
 
 def is_admin(user) -> bool:

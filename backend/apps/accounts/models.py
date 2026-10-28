@@ -40,6 +40,11 @@ class User(AbstractBaseUser, PermissionsMixin):
     class_count = models.IntegerField(default=0)
     is_verified = models.BooleanField(default=False, db_index=True)
 
+    # An admin can hand class-creation rights to one account without making it a
+    # lecturer: the flag is additive on top of the role, so revoking it returns
+    # the user to plain student permissions without touching anything else.
+    can_create_classes = models.BooleanField(default=False, db_index=True)
+
     # Wallet (integer pesewas)
     wallet_balance = models.IntegerField(default=0)
     wallet_updated_at = models.DateTimeField(default=timezone.now)

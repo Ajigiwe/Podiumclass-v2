@@ -178,21 +178,28 @@ fun RoomModerationModal(
                                         .background(if (autoApproveMic) IndigoPrimary.copy(alpha = 0.2f) else Color.White.copy(alpha = 0.08f))
                                         .border(1.dp, if (autoApproveMic) IndigoPrimary.copy(alpha = 0.4f) else CardBorder, RoundedCornerShape(12.dp))
                                         .clickable { onToggleSmartMic(!autoApproveMic) }
-                                        .padding(horizontal = 12.dp, vertical = 6.dp),
+                                        .padding(horizontal = 10.dp, vertical = 6.dp),
                                     verticalAlignment = Alignment.CenterVertically,
                                     horizontalArrangement = Arrangement.SpaceBetween
                                 ) {
-                                    Column {
+                                    // Weighted: the switch is a fixed ~52dp, so an
+                                    // unweighted column here left it no room at all
+                                    // in this half-width cell on a 360dp screen.
+                                    Column(modifier = Modifier.weight(1f)) {
                                         Text(
                                             text = "Smart Mic",
                                             color = Color.White,
                                             fontSize = 12.sp,
-                                            fontWeight = FontWeight.Bold
+                                            fontWeight = FontWeight.Bold,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
                                         )
                                         Text(
                                             text = "Auto-approve",
                                             color = TextSecondary,
-                                            fontSize = 9.sp
+                                            fontSize = 9.sp,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
                                         )
                                     }
                                     Switch(
@@ -432,12 +439,20 @@ fun RoomModerationModal(
                                         verticalAlignment = Alignment.CenterVertically,
                                         horizontalArrangement = Arrangement.SpaceBetween
                                     ) {
-                                        Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Row(
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            // Weighted so a long name ellipsises instead
+                                            // of squeezing the remove button out.
+                                            modifier = Modifier.weight(1f)
+                                        ) {
                                             Text(
                                                 text = cohost.userName,
                                                 color = Color.White,
                                                 fontSize = 12.sp,
-                                                fontWeight = FontWeight.SemiBold
+                                                fontWeight = FontWeight.SemiBold,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis,
+                                                modifier = Modifier.weight(1f, fill = false)
                                             )
                                             Spacer(modifier = Modifier.width(6.dp))
                                             Box(
@@ -486,6 +501,10 @@ fun RoomModerationModal(
                                     candidateParticipants.take(3).forEach { p ->
                                         Row(
                                             modifier = Modifier
+                                                // Weighted: chips sized to their names
+                                                // overflowed the card and were clipped
+                                                // on a narrow screen.
+                                                .weight(1f)
                                                 .clip(RoundedCornerShape(8.dp))
                                                 .background(Color.White.copy(alpha = 0.08f))
                                                 .clickable { onAppointCoHost(p.identity) }
@@ -504,7 +523,9 @@ fun RoomModerationModal(
                                                 color = TextPrimary,
                                                 fontSize = 10.sp,
                                                 fontWeight = FontWeight.Bold,
-                                                maxLines = 1
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis,
+                                                modifier = Modifier.weight(1f, fill = false)
                                             )
                                         }
                                     }

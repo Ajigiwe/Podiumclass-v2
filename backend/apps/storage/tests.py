@@ -1,6 +1,7 @@
 import os
 import shutil
 import tempfile
+from datetime import timedelta
 from unittest.mock import patch
 
 from django.conf import settings
@@ -235,6 +236,15 @@ class RecordingApiTests(TestCase):
         features.set_enabled("recordings", True)
         self._auth(self.lecturer)
 
+        # Whether anyone is publishing is a property of a live LiveKit room,
+        # which no test has. Default to "cannot tell" -- the start path treats
+        # that as permission to proceed -- and let the tests that are about the
+        # check itself override it. Without this the suite would call a real
+        # server whenever one happens to be running on the dev machine.
+        room_check = patch("apps.storage.egress.room_media", return_value=None)
+        self.room_media = room_check.start()
+        self.addCleanup(room_check.stop)
+
     def _auth(self, user):
         self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {issue_token(user)}")
 
@@ -358,9 +368,13 @@ class RecordingApiTests(TestCase):
 
     # --- stopping ---------------------------------------------------------
 
+    @patch("apps.storage.egress.wait_for_capture")
     @patch("apps.storage.egress.stop")
     @patch("apps.storage.egress.start_room_composite")
-    def test_the_host_stops_the_recording(self, start, stop):
+    def test_the_host_stops_the_recording(self, start, stop, wait):
+        # The row is created in the "starting" state, so the stop waits for
+        # capture first; this test is about the stop itself.
+        wait.return_value = self._worker_info(status="EGRESS_ACTIVE")
         start.return_value = self._worker_info()
         rec_id = self.client.post(self.base, {}, format="json").json()["document"]["id"]
 
@@ -395,6 +409,120 @@ class RecordingApiTests(TestCase):
         # Still live as far as we know: the caller may retry, so the row must
         # not have been flipped to something finished.
         self.assertEqual(Recording.objects.get(id="rec_live").status, "active")
+
+    @patch("apps.storage.egress.room_media")
+    @patch("apps.storage.egress.start_room_composite")
+    def test_starting_is_refused_when_nobody_is_publishing(self, start, media):
+        # A composite recording begins on the first track, so a room where
+        # every microphone and camera is off can only produce a job that waits
+        # in "starting" forever. Refusing early is the honest answer.
+        media.return_value = {"people": 1, "publishing": 0}
+        res = self.client.post(self.base, {}, format="json")
+        self.assertEqual(res.status_code, 400)
+        self.assertEqual(res.json()["error"]["code"], "NOTHING_TO_RECORD")
+        self.assertIn("microphone or camera", res.json()["error"]["message"])
+        self.assertFalse(start.called)
+        self.assertFalse(Recording.objects.filter(session=self.session).exists())
+
+    @patch("apps.storage.egress.room_media")
+    @patch("apps.storage.egress.start_room_composite")
+    def test_starting_proceeds_when_the_room_cannot_be_inspected(self, start, media):
+        # Never block a recording because the check itself was unavailable.
+        media.return_value = None
+        start.return_value = self._worker_info()
+        res = self.client.post(self.base, {}, format="json")
+        self.assertEqual(res.status_code, 201)
+
+    @patch("apps.storage.egress.stop")
+    @patch("apps.storage.egress.status")
+    def test_a_start_that_never_captures_is_closed_after_the_grace_period(
+        self, worker_status, stop
+    ):
+        # The real-world shape of "stuck on starting": the worker keeps saying
+        # EGRESS_STARTING because it has no media to capture.
+        self._row(
+            id="rec_stuck",
+            status="starting",
+            started_at=timezone.now() - timedelta(minutes=3),
+        )
+        worker_status.return_value = self._worker_info(status="EGRESS_STARTING")
+        res = self.client.get(f"{self.base}rec_stuck/")
+
+        self.assertEqual(res.status_code, 200)
+        doc = res.json()["document"]
+        self.assertEqual(doc["status"], "failed")
+        self.assertFalse(doc["isLive"])
+        self.assertIn("no audio or video", doc["error"])
+        self.assertEqual(Recording.objects.get(id="rec_stuck").status, "failed")
+        # The job is stopped so it does not sit in the worker's queue.
+        stop.assert_called_once_with("EG_seed")
+
+    @patch("apps.storage.egress.status")
+    def test_a_start_within_the_grace_period_keeps_waiting(self, worker_status):
+        self._row(id="rec_warm", status="starting")
+        worker_status.return_value = self._worker_info(status="EGRESS_STARTING")
+        doc = self.client.get(f"{self.base}rec_warm/").json()["document"]
+        self.assertEqual(doc["status"], "starting")
+        self.assertTrue(doc["isLive"])
+
+    def test_the_missing_start_signal_reads_as_nothing_to_record(self):
+        self._row(
+            id="rec_nostart",
+            status="failed",
+            metadata={"error": "Start signal not received"},
+        )
+        row = self.client.get(self.base).json()["documents"][0]
+        self.assertIn("no audio or video", row["error"])
+
+    @patch("apps.storage.egress.wait_for_capture")
+    @patch("apps.storage.egress.stop")
+    @patch("apps.storage.egress.start_room_composite")
+    def test_stopping_a_just_started_recording_waits_for_the_pipeline(
+        self, start, stop, wait
+    ):
+        # Pressing stop a second after record is the common case, and a stop
+        # sent while the worker is still starting aborts the take.
+        start.return_value = self._worker_info()
+        rec_id = self.client.post(self.base, {}, format="json").json()["document"]["id"]
+
+        wait.return_value = self._worker_info(status="EGRESS_ACTIVE")
+        stop.return_value = self._worker_info(status="EGRESS_ENDING")
+        res = self.client.post(f"{self.base}{rec_id}/stop/", {}, format="json")
+
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(res.json()["document"]["status"], "ending")
+        wait.assert_called_once_with("EG_test_1")
+        stop.assert_called_once_with("EG_test_1")
+
+    @patch("apps.storage.egress.wait_for_capture")
+    @patch("apps.storage.egress.stop")
+    @patch("apps.storage.egress.start_room_composite")
+    def test_an_aborted_pipeline_explains_itself_instead_of_quoting_the_worker(
+        self, start, stop, wait
+    ):
+        start.return_value = self._worker_info()
+        rec_id = self.client.post(self.base, {}, format="json").json()["document"]["id"]
+
+        wait.return_value = self._worker_info(status="EGRESS_ACTIVE")
+        stop.side_effect = egress.RecordingRejected(
+            "stop called before pipeline could start"
+        )
+        res = self.client.post(f"{self.base}{rec_id}/stop/", {}, format="json")
+
+        # Not a 400 banner: the row itself now says the take is gone.
+        self.assertEqual(res.status_code, 200)
+        doc = res.json()["document"]
+        self.assertEqual(doc["status"], "failed")
+        self.assertIn("nothing was saved", doc["error"])
+        self.assertNotIn("pipeline", doc["error"])
+
+    def test_a_row_written_with_the_workers_own_words_reads_friendly(self):
+        self._row(
+            id="rec_raw", status="failed",
+            metadata={"error": "Stop called before pipeline could start"},
+        )
+        row = self.client.get(self.base).json()["documents"][0]
+        self.assertIn("nothing was saved", row["error"])
 
     # --- polling ----------------------------------------------------------
 
@@ -521,3 +649,126 @@ class RecordingApiTests(TestCase):
                   file_path=os.path.join("..", "..", "secrets.mp4"))
         res = self.client.get(f"{self.base}rec_escape/file/")
         self.assertEqual(res.status_code, 404)
+
+
+class RecordingAutoSaveTests(TestCase):
+    """
+    A take must finish itself when the class it was recording goes away.
+
+    The worker writes from inside the room, so a host who closes their laptop
+    without ending the class leaves a file growing for ever; and ending a class
+    deletes the room, which used to kill the pipeline mid-write. Both are the
+    same user promise: whatever happened, there is a watchable MP4.
+    """
+
+    def setUp(self):
+        self.client = APIClient()
+        self.lecturer = User.objects.create(
+            id="usr_auto_lect", email="auto-lect@test.com", full_name="Dr. Auto",
+            role="lecturer",
+        )
+        self.session = Session.objects.create(
+            id="ses_auto_1", title="Abandoned Lab", host=self.lecturer,
+            meeting_code="POD-AUTO1", status="active", is_active=True,
+        )
+        self.base = f"/api/v1/classrooms/sessions/{self.session.id}/recordings/"
+        features.set_enabled("recordings", True)
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {issue_token(self.lecturer)}")
+
+        worker_status = patch("apps.storage.egress.status")
+        self.worker_status = worker_status.start()
+        self.worker_status.return_value = {
+            "egress_id": "EG_auto", "status": "EGRESS_ACTIVE",
+        }
+        self.addCleanup(worker_status.stop)
+
+        room = patch("apps.storage.egress.room_media", return_value={"people": 0, "publishing": 0})
+        self.room_media = room.start()
+        self.addCleanup(room.stop)
+
+        stop = patch("apps.storage.egress.stop")
+        self.stop = stop.start()
+        self.stop.return_value = {"egress_id": "EG_auto", "status": "EGRESS_ENDING"}
+        self.addCleanup(stop.stop)
+
+    def _row(self, **overrides):
+        defaults = dict(
+            id="rec_auto", session=self.session, egress_id="EG_auto",
+            room_id=self.session.id, lecturer_id=self.lecturer.id,
+            class_title=self.session.title, status="active",
+            file_path="auto.mp4", started_at=timezone.now(),
+            metadata={},
+        )
+        defaults.update(overrides)
+        return Recording.objects.create(**defaults)
+
+    def _read(self, recording_id="rec_auto"):
+        return self.client.get(f"{self.base}{recording_id}/").json()["document"]
+
+    def test_an_empty_room_is_watched_but_not_ended_straight_away(self):
+        rec = self._row()
+        doc = self._read()
+        self.assertEqual(doc["status"], "active")
+        self.assertFalse(self.stop.called)
+        rec.refresh_from_db()
+        # The clock starts now; ending on the first empty sample would kill a
+        # lecture every time a host's wifi hiccuped.
+        self.assertIn("empty_since", rec.metadata)
+        self.assertIn("presence_checked_at", rec.metadata)
+
+    def test_an_empty_room_past_the_grace_period_is_saved(self):
+        past = (timezone.now() - timedelta(seconds=300)).isoformat()
+        rec = self._row(metadata={"empty_since": past})
+        doc = self._read()
+        self.assertEqual(self.stop.call_count, 1)
+        self.assertEqual(doc["status"], "ending")
+        rec.refresh_from_db()
+        self.assertTrue(rec.metadata.get("auto_saved"))
+        self.assertNotIn("empty_since", rec.metadata)
+
+    def test_somebody_reconnecting_clears_the_empty_clock(self):
+        past = (timezone.now() - timedelta(seconds=300)).isoformat()
+        rec = self._row(metadata={"empty_since": past})
+        self.room_media.return_value = {"people": 1, "publishing": 1}
+        doc = self._read()
+        self.assertEqual(doc["status"], "active")
+        self.assertFalse(self.stop.called)
+        rec.refresh_from_db()
+        self.assertNotIn("empty_since", rec.metadata)
+
+    def test_an_unanswerable_room_check_leaves_the_recording_alone(self):
+        self.room_media.return_value = None
+        rec = self._row(metadata={'presence_checked_at': 'not-a-timestamp'})
+        doc = self._read()
+        self.assertEqual(doc["status"], "active")
+        self.assertFalse(self.stop.called)
+        rec.refresh_from_db()
+        # A check that could not run must not look like an empty class, and
+        # must not rewrite what the row already knows.
+        self.assertNotIn("empty_since", rec.metadata)
+
+    def test_the_room_is_not_asked_on_every_status_poll(self):
+        self._row(metadata={"presence_checked_at": timezone.now().isoformat()})
+        self._read()
+        self.assertFalse(self.room_media.called)
+
+    @patch("apps.classrooms.views.delete_livekit_room", return_value=True)
+    def test_ending_the_class_finalises_the_take(self, _delete):
+        self.stop.return_value = {"egress_id": "EG_auto", "status": "EGRESS_COMPLETE"}
+        rec = self._row()
+        res = self.client.post(f"/api/v1/classrooms/sessions/{self.session.id}/end/")
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(self.stop.call_count, 1)
+        rec.refresh_from_db()
+        self.assertEqual(rec.status, "complete")
+        self.assertIsNotNone(rec.ended_at)
+
+    @patch("apps.classrooms.views.delete_livekit_room", return_value=True)
+    def test_a_worker_that_cannot_stop_does_not_block_the_end(self, _delete):
+        self.stop.side_effect = egress.RecordingUnavailable("worker unreachable")
+        self._row()
+        res = self.client.post(f"/api/v1/classrooms/sessions/{self.session.id}/end/")
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(
+            Session.objects.get(id=self.session.id).status, "ended"
+        )

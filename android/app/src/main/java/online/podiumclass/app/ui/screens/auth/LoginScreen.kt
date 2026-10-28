@@ -6,7 +6,6 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Info
-import androidx.compose.material.icons.filled.School
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -20,6 +19,7 @@ import androidx.compose.ui.graphics.vector.addPathNodes
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import online.podiumclass.app.ui.components.PodiumLogo
 import online.podiumclass.app.ui.theme.SurfaceDark
 import online.podiumclass.app.ui.theme.TextSecondary
 
@@ -97,36 +97,11 @@ fun LoginScreen(
                 .widthIn(max = 380.dp)
         ) {
             // Podium Brand Header
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.Center,
+            PodiumLogo(
+                markSize = 44.dp,
+                textSize = 28,
                 modifier = Modifier.padding(bottom = 24.dp)
-            ) {
-                Box(
-                    contentAlignment = Alignment.Center,
-                    modifier = Modifier
-                        .size(40.dp)
-                        .clip(RoundedCornerShape(10.dp))
-                        .background(Color(0xFF1845D4))
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.School,
-                        contentDescription = "Cap",
-                        tint = Color.White,
-                        modifier = Modifier.size(22.dp)
-                    )
-                }
-
-                Spacer(modifier = Modifier.width(12.dp))
-
-                Text(
-                    text = "Podium",
-                    color = Color.White,
-                    fontSize = 28.sp,
-                    fontWeight = FontWeight.ExtraBold,
-                    letterSpacing = (-0.5).sp
-                )
-            }
+            )
 
             // Auth Card
             Card(

@@ -21,6 +21,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import online.podiumclass.app.data.api.models.AttendanceRecordDto
 import online.podiumclass.app.data.api.models.AttendanceSummaryDto
 import online.podiumclass.app.ui.theme.*
@@ -45,13 +46,19 @@ fun HostAttendanceManagerModal(
     var durationState by remember { mutableIntStateOf(checkDurationSeconds) }
     var intervalState by remember { mutableIntStateOf(checkIntervalMinutes) }
 
-    Dialog(onDismissRequest = onDismiss) {
+    Dialog(
+        onDismissRequest = onDismiss,
+        // The roster this modal manages is a list, so it takes the width the
+        // screen has (94%, capped on tablets) instead of the platform default.
+        properties = DialogProperties(usePlatformDefaultWidth = false)
+    ) {
         Card(
             shape = RoundedCornerShape(24.dp),
             colors = CardDefaults.cardColors(containerColor = SurfaceDark),
             modifier = Modifier
-                .fillMaxWidth()
-                .fillMaxHeight(0.9f)
+                .fillMaxWidth(0.94f)
+                .widthIn(max = 720.dp)
+                .fillMaxHeight(0.92f)
                 .border(1.dp, CardBorder, RoundedCornerShape(24.dp))
         ) {
             Column(
@@ -430,8 +437,13 @@ fun HostAttendanceManagerModal(
                                 fontSize = 12.sp,
                                 fontWeight = FontWeight.Bold,
                                 maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
+                                overflow = TextOverflow.Ellipsis,
+                                // Weighted: unweighted, a long name took the whole
+                                // row and pushed the score and status off a 360dp
+                                // screen rather than ellipsising.
+                                modifier = Modifier.weight(1f)
                             )
+                            Spacer(modifier = Modifier.width(8.dp))
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 Text(
                                     text = "${record.verificationsCompleted}/${record.verificationsSent}",

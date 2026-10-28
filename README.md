@@ -86,11 +86,31 @@ npm install
 npm run dev                       # Starts Vite server on http://localhost:3000
 ```
 
+Google sign-in only works from an origin the OAuth client has registered as an
+**Authorized JavaScript origin** (in Google Cloud Console). The app checks this
+before opening the popup and explains it in-place if it does not match. Override
+the client or the registered origins without touching source:
+
+```bash
+VITE_GOOGLE_CLIENT_ID=...                       # defaults to the built-in client
+VITE_GOOGLE_ALLOWED_ORIGINS=http://localhost:3000,http://192.168.1.20:3000
+```
+
 ### 3. Production Build & Typecheck
 ```bash
 cd frontend
 npm run build                     # Runs vue-tsc typechecker & vite build
 ```
+
+### 4. Deploying to the VPS
+Production runs a separate, self-contained stack — Caddy (automatic TLS), nginx-served SPA, gunicorn, PostgreSQL, Redis, LiveKit and the recording worker:
+
+```bash
+cp deploy/.env.example deploy/.env      # fill in the secrets and hostnames
+sudo bash deploy/deploy.sh
+```
+
+See **[DEPLOY_VPS.md](DEPLOY_VPS.md)** for server preparation, DNS, ports, verification, updates, backups and troubleshooting. The development `docker-compose.yml` is unchanged and is not used on the server.
 
 ---
 

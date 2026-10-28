@@ -6,8 +6,11 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
@@ -16,13 +19,20 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import online.podiumclass.app.data.api.models.AutoAttendanceSettingsDto
 import online.podiumclass.app.data.api.models.CreateSessionRequest
+import online.podiumclass.app.data.api.models.RecordingDto
 import online.podiumclass.app.data.api.models.SessionDto
 import online.podiumclass.app.ui.theme.*
 import java.text.SimpleDateFormat
@@ -34,20 +44,42 @@ fun DashboardScreen(
     sessions: List<SessionDto>,
     isLoading: Boolean,
     isLecturer: Boolean,
+    // Admins get the control panel alongside their own classes.
+    isAdmin: Boolean = false,
+    onNavigateAdmin: () -> Unit = {},
     userName: String = "User",
+    userId: String? = null,
     walletBalance: Long = 10000,
+    themeMode: String = "system",
+    onToggleTheme: () -> Unit = {},
     onJoinClass: (String) -> Unit,
     onCreateClass: (CreateSessionRequest) -> Unit,
+    onNavigateAttendance: () -> Unit = {},
+    onNavigateProfile: () -> Unit = {},
     onLogout: () -> Unit,
-    onRefresh: () -> Unit
+    onRefresh: () -> Unit,
+    onEndClass: (String) -> Unit = {},
+    onDeleteClass: (String) -> Unit = {},
+    // Records: the classes this user runs, newest first. Empty for a student --
+    // the server answers a participant with nothing at all.
+    recordings: List<RecordingDto> = emptyList(),
+    isLoadingRecords: Boolean = false,
+    recordsError: String? = null,
+    onRefreshRecords: () -> Unit = {},
+    // The class just created, if there is one: a new class does not open, so
+    // this is the host's moment to share the code before anyone tries to join.
+    createdSession: SessionDto? = null,
+    onDismissCreatedSession: () -> Unit = {},
+    onStartCreatedSession: (String) -> Unit = {},
+    apiUrl: String = ""
 ) {
+    val colors = AppTheme.colors
     var showCreateModal by remember { mutableStateOf(false) }
-    var showWalletModal by remember { mutableStateOf(false) }
-    var showAttendanceModal by remember { mutableStateOf(false) }
-    var showProfileModal by remember { mutableStateOf(false) }
     var quickMeetingCode by remember { mutableStateOf("") }
-    var activeTab by remember { mutableStateOf("enrolled") } // "enrolled" or "hosted"
-    var selectedBottomNav by remember { mutableStateOf(0) }
+    // Sessions awaiting confirmation, kept separate so we never act on a tap by
+    // accident: end and delete are both irreversible from the dashboard.
+    var sessionToEnd by remember { mutableStateOf<SessionDto?>(null) }
+    var sessionToDelete by remember { mutableStateOf<SessionDto?>(null) }
 
     val calendar = remember { Calendar.getInstance() }
     val hour = calendar.get(Calendar.HOUR_OF_DAY)
@@ -66,87 +98,76 @@ fun DashboardScreen(
         sessions.filter { it.status.equals("active", ignoreCase = true) || it.is_active }
     }
 
-    val hostedCount = remember(sessions, isLecturer) {
-        if (isLecturer) sessions.size else 0
+    // "Hosted" means classes this user actually owns, not every class on screen
+    // (which, for a student, is none of them).
+    val hostedCount = remember(sessions, userId) {
+        sessions.count { !it.hostId.isNullOrBlank() && it.hostId == userId }
     }
 
-    val filteredSessions = remember(sessions, activeTab, isLecturer) {
-        if (activeTab == "hosted") {
-            if (isLecturer) sessions else emptyList()
-        } else {
-            sessions
-        }
-    }
+    val enrolledCount = sessions.size - hostedCount
 
     Scaffold(
-        containerColor = Color(0xFF090B11),
+        containerColor = colors.background,
         bottomBar = {
             NavigationBar(
-                containerColor = Color(0xFF0D0D1A),
-                contentColor = Color.White,
+                containerColor = colors.surface,
+                contentColor = colors.textPrimary,
                 tonalElevation = 8.dp
             ) {
                 NavigationBarItem(
-                    selected = selectedBottomNav == 0,
-                    onClick = { selectedBottomNav = 0 },
-                    icon = { Icon(Icons.Default.Home, contentDescription = "Home") },
-                    label = { Text("Home", fontSize = 11.sp, fontWeight = FontWeight.SemiBold) },
+                    selected = true,
+                    onClick = { /* Current Screen */ },
+                    icon = { Icon(Icons.Default.School, contentDescription = "Classes") },
+                    label = { Text("Classes", fontSize = 11.sp, fontWeight = FontWeight.SemiBold) },
                     colors = NavigationBarItemDefaults.colors(
                         selectedIconColor = Color.White,
-                        selectedTextColor = Color(0xFF1845D4),
-                        indicatorColor = Color(0xFF1845D4),
-                        unselectedIconColor = Color(0xFF64748B),
-                        unselectedTextColor = Color(0xFF64748B)
+                        selectedTextColor = colors.primary,
+                        indicatorColor = colors.primary,
+                        unselectedIconColor = colors.textSecondary,
+                        unselectedTextColor = colors.textSecondary
                     )
                 )
                 NavigationBarItem(
-                    selected = selectedBottomNav == 1,
-                    onClick = {
-                        selectedBottomNav = 1
-                        showWalletModal = true
-                    },
-                    icon = { Icon(Icons.Default.AccountBalanceWallet, contentDescription = "Wallet") },
-                    label = { Text("Wallet", fontSize = 11.sp, fontWeight = FontWeight.SemiBold) },
-                    colors = NavigationBarItemDefaults.colors(
-                        selectedIconColor = Color.White,
-                        selectedTextColor = Color(0xFF1845D4),
-                        indicatorColor = Color(0xFF1845D4),
-                        unselectedIconColor = Color(0xFF64748B),
-                        unselectedTextColor = Color(0xFF64748B)
-                    )
-                )
-                NavigationBarItem(
-                    selected = selectedBottomNav == 2,
-                    onClick = {
-                        selectedBottomNav = 2
-                        showAttendanceModal = true
-                    },
-                    icon = { Icon(Icons.Default.AssignmentTurnedIn, contentDescription = "Attendance") },
+                    selected = false,
+                    onClick = onNavigateAttendance,
+                    icon = { Icon(Icons.Default.FactCheck, contentDescription = "Attendance") },
                     label = { Text("Attendance", fontSize = 11.sp, fontWeight = FontWeight.SemiBold) },
                     colors = NavigationBarItemDefaults.colors(
                         selectedIconColor = Color.White,
-                        selectedTextColor = Color(0xFF1845D4),
-                        indicatorColor = Color(0xFF1845D4),
-                        unselectedIconColor = Color(0xFF64748B),
-                        unselectedTextColor = Color(0xFF64748B)
+                        selectedTextColor = colors.primary,
+                        indicatorColor = colors.primary,
+                        unselectedIconColor = colors.textSecondary,
+                        unselectedTextColor = colors.textSecondary
                     )
                 )
                 NavigationBarItem(
-                    selected = selectedBottomNav == 3,
-                    onClick = {
-                        selectedBottomNav = 3
-                        showProfileModal = true
-                    },
+                    selected = false,
+                    onClick = onNavigateProfile,
                     icon = { Icon(Icons.Default.Person, contentDescription = "Profile") },
                     label = { Text("Profile", fontSize = 11.sp, fontWeight = FontWeight.SemiBold) },
                     colors = NavigationBarItemDefaults.colors(
                         selectedIconColor = Color.White,
-                        selectedTextColor = Color(0xFF1845D4),
-                        indicatorColor = Color(0xFF1845D4),
-                        unselectedIconColor = Color(0xFF64748B),
-                        unselectedTextColor = Color(0xFF64748B)
+                        selectedTextColor = colors.primary,
+                        indicatorColor = colors.primary,
+                        unselectedIconColor = colors.textSecondary,
+                        unselectedTextColor = colors.textSecondary
                     )
                 )
+                if (isAdmin) {
+                    NavigationBarItem(
+                        selected = false,
+                        onClick = onNavigateAdmin,
+                        icon = { Icon(Icons.Default.AdminPanelSettings, contentDescription = "Admin") },
+                        label = { Text("Admin", fontSize = 11.sp, fontWeight = FontWeight.SemiBold) },
+                        colors = NavigationBarItemDefaults.colors(
+                            selectedIconColor = Color.White,
+                            selectedTextColor = colors.primary,
+                            indicatorColor = colors.primary,
+                            unselectedIconColor = colors.textSecondary,
+                            unselectedTextColor = colors.textSecondary
+                        )
+                    )
+                }
             }
         }
     ) { padding ->
@@ -157,65 +178,116 @@ fun DashboardScreen(
                 .padding(horizontal = 16.dp, vertical = 12.dp),
             verticalArrangement = Arrangement.spacedBy(18.dp)
         ) {
-            // 1. Header Row (Mirroring DashboardView.vue lines 4-19)
+            // 1. Header (Mirroring DashboardView.vue lines 4-19)
+            //
+            // Two rows on purpose. Greeting, theme, refresh and "New class"
+            // used to share one line, which on a phone squeezed the name and
+            // left the two round icon buttons touching each other. The date
+            // now keeps the icons company on the second row instead.
             item {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Column(modifier = Modifier.weight(1f)) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(modifier = Modifier.fillMaxWidth()) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text(
+                                    text = "Good ",
+                                    color = colors.textPrimary,
+                                    fontSize = 22.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                                Text(
+                                    text = greetingTime,
+                                    color = colors.primary,
+                                    fontSize = 22.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                                Text(
+                                    text = ",",
+                                    color = colors.textPrimary,
+                                    fontSize = 22.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
                             Text(
-                                text = "Good ",
-                                color = Color.White,
-                                fontSize = 22.sp,
-                                fontWeight = FontWeight.Bold
-                            )
-                            Text(
-                                text = greetingTime,
-                                color = Color(0xFF3B82F6),
-                                fontSize = 22.sp,
-                                fontWeight = FontWeight.Bold
-                            )
-                            Text(
-                                text = ",",
-                                color = Color.White,
-                                fontSize = 22.sp,
-                                fontWeight = FontWeight.Bold
+                                text = userName,
+                                color = colors.textPrimary,
+                                fontSize = 20.sp,
+                                fontWeight = FontWeight.ExtraBold,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
                             )
                         }
-                        Text(
-                            text = userName,
-                            color = Color.White,
-                            fontSize = 20.sp,
-                            fontWeight = FontWeight.ExtraBold,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                        Text(
-                            text = currentDateStr,
-                            color = Color(0xFF8888A8),
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.Medium,
-                            modifier = Modifier.padding(top = 2.dp)
-                        )
+
+                        // Hosting is a lecturer action -- the server refuses a
+                        // student's create call, so it is not offered to one.
+                        if (isLecturer) {
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Button(
+                                onClick = { showCreateModal = true },
+                                colors = ButtonDefaults.buttonColors(containerColor = colors.primary),
+                                shape = RoundedCornerShape(8.dp),
+                                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp)
+                            ) {
+                                Icon(Icons.Default.Add, contentDescription = "New class", modifier = Modifier.size(16.dp))
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text("New class", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                            }
+                        }
                     }
 
-                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        Button(
-                            onClick = { showCreateModal = true },
-                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1845D4)),
-                            shape = RoundedCornerShape(8.dp),
-                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp)
-                        ) {
-                            Icon(Icons.Default.Add, contentDescription = "New class", modifier = Modifier.size(16.dp))
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text("New class", fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                        }
+                    Spacer(modifier = Modifier.height(10.dp))
 
-                        IconButton(onClick = onRefresh, modifier = Modifier.size(36.dp)) {
-                            Icon(Icons.Default.Refresh, contentDescription = "Refresh", tint = Color(0xFF8888A8))
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text(
+                            text = currentDateStr,
+                            color = colors.textSecondary,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Medium,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f)
+                        )
+
+                        // Their own row, and 12dp apart, so neither button is a
+                        // mis-tap for the other on a narrow screen.
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(12.dp)
+                        ) {
+                            // Light / Dark Theme Toggle directly on Main Screen
+                            IconButton(
+                                onClick = onToggleTheme,
+                                modifier = Modifier
+                                    .size(38.dp)
+                                    .clip(CircleShape)
+                                    .background(colors.surfaceElevated)
+                                    .border(1.dp, colors.cardBorder, CircleShape)
+                            ) {
+                                Icon(
+                                    imageVector = if (colors.isDark) Icons.Default.LightMode else Icons.Default.DarkMode,
+                                    contentDescription = "Toggle theme",
+                                    tint = if (colors.isDark) AmberWarning else IndigoPrimary,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
+
+                            IconButton(
+                                onClick = onRefresh,
+                                modifier = Modifier
+                                    .size(38.dp)
+                                    .clip(CircleShape)
+                                    .background(colors.surfaceElevated)
+                                    .border(1.dp, colors.cardBorder, CircleShape)
+                            ) {
+                                Icon(Icons.Default.Refresh, contentDescription = "Refresh", tint = colors.textSecondary, modifier = Modifier.size(18.dp))
+                            }
                         }
                     }
                 }
@@ -225,15 +297,15 @@ fun DashboardScreen(
             item {
                 Card(
                     shape = RoundedCornerShape(12.dp),
-                    colors = CardDefaults.cardColors(containerColor = Color(0xFF111522)),
+                    colors = CardDefaults.cardColors(containerColor = colors.surface),
                     modifier = Modifier
                         .fillMaxWidth()
-                        .border(1.dp, Color.White.copy(alpha = 0.08f), RoundedCornerShape(12.dp))
+                        .border(1.dp, colors.cardBorder, RoundedCornerShape(12.dp))
                 ) {
                     Column(modifier = Modifier.padding(14.dp)) {
                         Text(
                             text = "JOIN A CLASS",
-                            color = Color(0xFF8888A8),
+                            color = colors.textSecondary,
                             fontSize = 11.sp,
                             fontWeight = FontWeight.Bold,
                             letterSpacing = 1.sp
@@ -247,15 +319,15 @@ fun DashboardScreen(
                             OutlinedTextField(
                                 value = quickMeetingCode,
                                 onValueChange = { quickMeetingCode = it },
-                                placeholder = { Text("Enter meeting code...", color = Color(0xFF64748B), fontSize = 13.sp) },
+                                placeholder = { Text("Enter meeting code...", color = colors.textTertiary, fontSize = 13.sp) },
                                 singleLine = true,
                                 colors = OutlinedTextFieldDefaults.colors(
-                                    focusedTextColor = Color.White,
-                                    unfocusedTextColor = Color.White,
-                                    focusedBorderColor = Color(0xFF1845D4),
-                                    unfocusedBorderColor = Color.White.copy(alpha = 0.12f),
-                                    focusedContainerColor = Color(0xFF0D0D1A),
-                                    unfocusedContainerColor = Color(0xFF0D0D1A)
+                                    focusedTextColor = colors.textPrimary,
+                                    unfocusedTextColor = colors.textPrimary,
+                                    focusedBorderColor = colors.primary,
+                                    unfocusedBorderColor = colors.cardBorder,
+                                    focusedContainerColor = colors.surfaceElevated,
+                                    unfocusedContainerColor = colors.surfaceElevated
                                 ),
                                 shape = RoundedCornerShape(8.dp),
                                 modifier = Modifier
@@ -269,7 +341,7 @@ fun DashboardScreen(
                                         onJoinClass(quickMeetingCode.trim())
                                     }
                                 },
-                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1845D4)),
+                                colors = ButtonDefaults.buttonColors(containerColor = colors.primary),
                                 shape = RoundedCornerShape(8.dp),
                                 modifier = Modifier.height(48.dp)
                             ) {
@@ -286,10 +358,10 @@ fun DashboardScreen(
                 item {
                     Card(
                         shape = RoundedCornerShape(12.dp),
-                        colors = CardDefaults.cardColors(containerColor = Color(0xFF111522)),
+                        colors = CardDefaults.cardColors(containerColor = colors.surface),
                         modifier = Modifier
                             .fillMaxWidth()
-                            .border(1.dp, Color(0xFFEF4444).copy(alpha = 0.3f), RoundedCornerShape(12.dp))
+                            .border(1.dp, colors.error.copy(alpha = 0.3f), RoundedCornerShape(12.dp))
                     ) {
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
@@ -303,7 +375,7 @@ fun DashboardScreen(
                                     .width(4.dp)
                                     .height(36.dp)
                                     .clip(RoundedCornerShape(2.dp))
-                                    .background(Color(0xFFEF4444))
+                                    .background(colors.error)
                             )
                             Spacer(modifier = Modifier.width(12.dp))
 
@@ -311,21 +383,21 @@ fun DashboardScreen(
                                 modifier = Modifier
                                     .size(8.dp)
                                     .clip(CircleShape)
-                                    .background(Color(0xFFEF4444))
+                                    .background(colors.error)
                             )
                             Spacer(modifier = Modifier.width(8.dp))
 
                             Column(modifier = Modifier.weight(1f)) {
                                 Text(
                                     text = "LIVE NOW",
-                                    color = Color(0xFFF87171),
+                                    color = colors.error,
                                     fontSize = 10.sp,
                                     fontWeight = FontWeight.Black,
                                     letterSpacing = 1.sp
                                 )
                                 Text(
                                     text = "${liveSession.title} — ${liveSession.course ?: "General"}",
-                                    color = Color.White,
+                                    color = colors.textPrimary,
                                     fontSize = 13.sp,
                                     fontWeight = FontWeight.Bold,
                                     maxLines = 1,
@@ -335,7 +407,7 @@ fun DashboardScreen(
 
                             Button(
                                 onClick = { onJoinClass(liveSession.id) },
-                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1845D4)),
+                                colors = ButtonDefaults.buttonColors(containerColor = colors.primary),
                                 shape = RoundedCornerShape(8.dp),
                                 contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
                             ) {
@@ -355,7 +427,7 @@ fun DashboardScreen(
                     // Card 1: Enrolled
                     StatCard(
                         title = "ENROLLED",
-                        value = "${sessions.size}",
+                        value = "$enrolledCount",
                         icon = Icons.Default.School,
                         iconColor = Color(0xFF3B82F6),
                         iconBg = Color(0xFF1E3A8A).copy(alpha = 0.3f),
@@ -374,44 +446,97 @@ fun DashboardScreen(
                 }
             }
 
-            // 5. Jump Back In Section (Mirroring DashboardView.vue lines 132-174)
-            if (sessions.isNotEmpty()) {
+            // 4b. Nothing here yet. The list now holds only the classes this
+            // account is actually in, so a new student arrives with an empty
+            // dashboard -- which needs to say how a class is joined, rather than
+            // looking broken.
+            if (sessions.isEmpty() && !isLoading) {
                 item {
-                    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Box(
-                                modifier = Modifier
-                                    .size(8.dp)
-                                    .clip(CircleShape)
-                                    .background(Color(0xFFEF4444))
+                    Card(
+                        shape = RoundedCornerShape(14.dp),
+                        colors = CardDefaults.cardColors(containerColor = colors.surface),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .border(1.dp, colors.cardBorder, RoundedCornerShape(14.dp))
+                    ) {
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 20.dp, vertical = 28.dp)
+                        ) {
+                            Icon(
+                                Icons.Default.School,
+                                contentDescription = null,
+                                tint = colors.textTertiary,
+                                modifier = Modifier.size(40.dp)
                             )
-                            Spacer(modifier = Modifier.width(8.dp))
+                            Spacer(modifier = Modifier.height(10.dp))
                             Text(
-                                text = "JUMP BACK IN",
-                                color = Color.White,
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.Bold,
-                                letterSpacing = 1.sp
+                                text = if (isLecturer) "No classes yet" else "You have not joined a class yet",
+                                color = colors.textPrimary,
+                                fontSize = 15.sp,
+                                fontWeight = FontWeight.Bold
                             )
-                        }
-
-                        sessions.take(3).forEach { session ->
-                            SessionItemCard(
-                                session = session,
-                                onClick = { onJoinClass(session.id) }
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Text(
+                                text = if (isLecturer)
+                                    "Create a class to get started."
+                                else
+                                    "Enter the meeting code from your lecturer above, or open the invite link you were sent.",
+                                color = colors.textSecondary,
+                                fontSize = 12.sp,
+                                textAlign = TextAlign.Center
                             )
                         }
                     }
                 }
             }
 
-            // 6. Action Cards (Mirroring DashboardView.vue lines 177-205)
-            item {
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(10.dp),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    // Create Class Action Card
+            // 5. Your classes. Every class, as a lazy list rather than three
+            // cards crammed into one column: the dashboard is the screen people
+            // return to, so it has to survive a term's worth of classes.
+            if (sessions.isNotEmpty()) {
+                item {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Box(
+                            modifier = Modifier
+                                .size(8.dp)
+                                .clip(CircleShape)
+                                .background(colors.error)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = "YOUR CLASSES",
+                            color = colors.textPrimary,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold,
+                            letterSpacing = 1.sp
+                        )
+                        Spacer(modifier = Modifier.weight(1f))
+                        Text(
+                            text = "${sessions.size}",
+                            color = colors.textSecondary,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                }
+
+                items(sessions, key = { "session-" + it.id }) { session ->
+                    SessionItemCard(
+                        session = session,
+                        canManage = isLecturer,
+                        onClick = { onJoinClass(session.id) },
+                        onEnd = { sessionToEnd = session },
+                        onDelete = { sessionToDelete = session }
+                    )
+                }
+            }
+
+            // 6. Action Card: Create a Class
+            if (isLecturer) {
+                item {
                     ActionBannerCard(
                         title = "Create a class",
                         description = "Set up a new classroom session and invite students.",
@@ -419,88 +544,56 @@ fun DashboardScreen(
                         icon = Icons.Default.Add,
                         iconBg = Color(0xFF1845D4),
                         onClick = { showCreateModal = true },
-                        modifier = Modifier.weight(1f)
-                    )
-
-                    // Biometric Attendance Action Card
-                    ActionBannerCard(
-                        title = "Biometric Attendance",
-                        description = "Inspect check-in telemetry and verify institutional records.",
-                        linkText = "Inspect Attendance →",
-                        icon = Icons.Default.FactCheck,
-                        iconBg = Color(0xFF7C3AED),
-                        onClick = { showAttendanceModal = true },
-                        modifier = Modifier.weight(1f)
+                        modifier = Modifier.fillMaxWidth()
                     )
                 }
             }
 
-            // 7. My Classes with Tabs (Mirroring DashboardView.vue lines 208-250)
-            item {
-                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween,
+            // 6b. Admins: the control panel, one tap from their own classes.
+            if (isAdmin) {
+                item {
+                    ActionBannerCard(
+                        title = "Control panel",
+                        description = "Accounts, class-creation grants, live classes and platform flags.",
+                        linkText = "Open panel →",
+                        icon = Icons.Default.AdminPanelSettings,
+                        iconBg = colors.error,
+                        onClick = onNavigateAdmin,
                         modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Text(
-                            text = "MY CLASSES",
-                            color = Color.White,
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.Bold,
-                            letterSpacing = 1.sp
-                        )
+                    )
+                }
+            }
 
-                        // Pill Switcher
-                        Row(
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(8.dp))
-                                .background(Color(0xFF111522))
-                                .padding(2.dp)
-                        ) {
-                            PillTabButton(
-                                text = "Enrolled",
-                                selected = activeTab == "enrolled",
-                                onClick = { activeTab = "enrolled" }
-                            )
-                            PillTabButton(
-                                text = "Hosted",
-                                selected = activeTab == "hosted",
-                                onClick = { activeTab = "hosted" }
-                            )
-                        }
-                    }
-
-                    if (filteredSessions.isEmpty()) {
-                        Box(
-                            contentAlignment = Alignment.Center,
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(vertical = 32.dp)
-                        ) {
-                            Text(
-                                text = if (activeTab == "hosted") "No hosted classes yet" else "No enrolled classes yet",
-                                color = Color(0xFF64748B),
-                                fontSize = 13.sp,
-                                fontWeight = FontWeight.Medium
-                            )
-                        }
-                    } else {
-                        filteredSessions.forEach { session ->
-                            SessionItemCard(
-                                session = session,
-                                onClick = { onJoinClass(session.id) }
-                            )
-                        }
-                    }
+            // 7. Records: the host's recordings, where only they can watch,
+            // save and pass them on.
+            if (isLecturer) {
+                item {
+                    RecordsSection(
+                        recordings = recordings,
+                        isLoading = isLoadingRecords,
+                        error = recordsError,
+                        onRefresh = onRefreshRecords
+                    )
                 }
             }
         }
     }
 
-    // Modal 1: Create Class Modal (Matching web modal)
-    if (showCreateModal) {
+    // A class that was just created stays on the dashboard: it is not live
+    // until its host walks in, so the code matters more than the room does.
+    createdSession?.let { created ->
+        ShareClassDialog(
+            session = created,
+            apiUrl = apiUrl,
+            onDismiss = onDismissCreatedSession,
+            onStart = { onStartCreatedSession(created.id) }
+        )
+    }
+
+    // Modal: Create Class Modal (Matching web modal)
+    if (showCreateModal && isLecturer) {
         CreateClassDialog(
+            defaultLecturer = userName,
             onDismiss = { showCreateModal = false },
             onCreate = { request ->
                 showCreateModal = false
@@ -509,41 +602,31 @@ fun DashboardScreen(
         )
     }
 
-    // Modal 2: Wallet Sheet
-    if (showWalletModal) {
-        WalletDialog(
-            balance = walletBalance,
-            onDismiss = {
-                showWalletModal = false
-                selectedBottomNav = 0
-            }
-        )
-    }
-
-    // Modal 3: Attendance Sheet
-    if (showAttendanceModal) {
-        AttendanceSummaryDialog(
-            sessions = sessions,
-            onDismiss = {
-                showAttendanceModal = false
-                selectedBottomNav = 0
-            }
-        )
-    }
-
-    // Modal 4: Profile / Settings Sheet
-    if (showProfileModal) {
-        ProfileDialog(
-            userName = userName,
-            isLecturer = isLecturer,
-            onLogout = {
-                showProfileModal = false
-                onLogout()
+    sessionToEnd?.let { session ->
+        ConfirmActionDialog(
+            title = "End class?",
+            message = "\"${session.title}\" will be marked as ended and students can no longer join.",
+            confirmLabel = "End class",
+            onConfirm = {
+                val id = session.id
+                sessionToEnd = null
+                onEndClass(id)
             },
-            onDismiss = {
-                showProfileModal = false
-                selectedBottomNav = 0
-            }
+            onDismiss = { sessionToEnd = null }
+        )
+    }
+
+    sessionToDelete?.let { session ->
+        ConfirmActionDialog(
+            title = "Delete class?",
+            message = "\"${session.title}\" will be removed from your dashboard. Attendance history is kept.",
+            confirmLabel = "Delete",
+            onConfirm = {
+                val id = session.id
+                sessionToDelete = null
+                onDeleteClass(id)
+            },
+            onDismiss = { sessionToDelete = null }
         )
     }
 }
@@ -561,11 +644,12 @@ fun StatCard(
     onClick: (() -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
+    val colors = AppTheme.colors
     Card(
         shape = RoundedCornerShape(12.dp),
-        colors = CardDefaults.cardColors(containerColor = Color(0xFF111522)),
+        colors = CardDefaults.cardColors(containerColor = colors.surface),
         modifier = modifier
-            .border(1.dp, Color.White.copy(alpha = 0.08f), RoundedCornerShape(12.dp))
+            .border(1.dp, colors.cardBorder, RoundedCornerShape(12.dp))
             .then(if (onClick != null) Modifier.clickable { onClick() } else Modifier)
     ) {
         Column(modifier = Modifier.padding(14.dp)) {
@@ -582,7 +666,7 @@ fun StatCard(
                 Spacer(modifier = Modifier.width(8.dp))
                 Text(
                     text = title,
-                    color = Color(0xFF8888A8),
+                    color = colors.textSecondary,
                     fontSize = 11.sp,
                     fontWeight = FontWeight.Bold,
                     letterSpacing = 0.8.sp
@@ -592,7 +676,7 @@ fun StatCard(
             Spacer(modifier = Modifier.height(10.dp))
             Text(
                 text = value,
-                color = Color.White,
+                color = colors.textPrimary,
                 fontSize = 24.sp,
                 fontWeight = FontWeight.Bold
             )
@@ -620,11 +704,12 @@ fun ActionBannerCard(
     onClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val colors = AppTheme.colors
     Card(
         shape = RoundedCornerShape(12.dp),
-        colors = CardDefaults.cardColors(containerColor = Color(0xFF111522)),
+        colors = CardDefaults.cardColors(containerColor = colors.surface),
         modifier = modifier
-            .border(1.dp, Color.White.copy(alpha = 0.08f), RoundedCornerShape(12.dp))
+            .border(1.dp, colors.cardBorder, RoundedCornerShape(12.dp))
             .clickable { onClick() }
     ) {
         Column(modifier = Modifier.padding(14.dp)) {
@@ -641,14 +726,14 @@ fun ActionBannerCard(
             Spacer(modifier = Modifier.height(10.dp))
             Text(
                 text = title,
-                color = Color.White,
+                color = colors.textPrimary,
                 fontSize = 14.sp,
                 fontWeight = FontWeight.Bold
             )
             Spacer(modifier = Modifier.height(4.dp))
             Text(
                 text = description,
-                color = Color(0xFF8888A8),
+                color = colors.textSecondary,
                 fontSize = 11.sp,
                 lineHeight = 15.sp,
                 maxLines = 2,
@@ -668,85 +753,206 @@ fun ActionBannerCard(
 @Composable
 fun SessionItemCard(
     session: SessionDto,
-    onClick: () -> Unit
+    canManage: Boolean = false,
+    onClick: () -> Unit,
+    onEnd: () -> Unit = {},
+    onDelete: () -> Unit = {}
 ) {
+    val colors = AppTheme.colors
+    val context = LocalContext.current
     val isLive = session.status.equals("active", ignoreCase = true) || session.is_active
 
     Card(
-        shape = RoundedCornerShape(12.dp),
-        colors = CardDefaults.cardColors(containerColor = Color(0xFF111522)),
+        shape = RoundedCornerShape(14.dp),
+        colors = CardDefaults.cardColors(containerColor = colors.surface),
         modifier = Modifier
             .fillMaxWidth()
-            .border(1.dp, Color.White.copy(alpha = 0.08f), RoundedCornerShape(12.dp))
+            .border(1.dp, colors.cardBorder, RoundedCornerShape(14.dp))
             .clickable { onClick() }
     ) {
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(14.dp)
-        ) {
-            Box(
-                contentAlignment = Alignment.Center,
-                modifier = Modifier
-                    .size(40.dp)
-                    .clip(RoundedCornerShape(10.dp))
-                    .background(if (isLive) Color(0xFF1845D4).copy(alpha = 0.2f) else Color(0xFF1E293B))
-            ) {
-                Icon(
-                    imageVector = if (isLive) Icons.Default.Videocam else Icons.Default.School,
-                    contentDescription = "Session",
-                    tint = if (isLive) Color(0xFF3B82F6) else Color(0xFF8888A8),
-                    modifier = Modifier.size(20.dp)
-                )
-            }
-
-            Spacer(modifier = Modifier.width(12.dp))
-
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = session.title,
-                    color = Color.White,
-                    fontSize = 14.sp,
-                    fontWeight = FontWeight.Bold,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
-                Text(
-                    text = "${session.course ?: "General"} • ${session.lecturerName ?: "Faculty Lecturer"}",
-                    color = Color(0xFF8888A8),
-                    fontSize = 11.sp,
-                    fontWeight = FontWeight.Medium,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
-            }
-
-            Spacer(modifier = Modifier.width(8.dp))
-
-            if (isLive) {
-                Surface(
-                    color = Color(0xFF1845D4),
-                    shape = RoundedCornerShape(4.dp)
+        // Two rows instead of one crowded line. The old single row had an icon,
+        // a title, course, lecturer, a LIVE badge and up to two action buttons
+        // competing for 360dp, so on a phone the title collapsed to a few
+        // letters and the buttons sat under the thumb by accident. Identity
+        // lives on the top row; facts and actions get their own row below.
+        Column(modifier = Modifier.padding(14.dp)) {
+            Row(verticalAlignment = Alignment.Top) {
+                Box(
+                    contentAlignment = Alignment.Center,
+                    modifier = Modifier
+                        .size(42.dp)
+                        .clip(RoundedCornerShape(11.dp))
+                        .background(if (isLive) colors.primary.copy(alpha = 0.15f) else colors.surfaceElevated)
                 ) {
-                    Text(
-                        text = "LIVE",
-                        color = Color.White,
-                        fontSize = 9.sp,
-                        fontWeight = FontWeight.Black,
-                        letterSpacing = 1.sp,
-                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                    Icon(
+                        imageVector = if (isLive) Icons.Default.Videocam else Icons.Default.School,
+                        contentDescription = null,
+                        tint = if (isLive) colors.primary else colors.textSecondary,
+                        modifier = Modifier.size(20.dp)
                     )
                 }
-            } else {
+
+                Spacer(modifier = Modifier.width(12.dp))
+
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = session.title,
+                        color = colors.textPrimary,
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.Bold,
+                        lineHeight = 18.sp,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    Spacer(modifier = Modifier.height(2.dp))
+                    Text(
+                        text = listOfNotNull(
+                            session.course ?: "General",
+                            session.lecturerName ?: "Faculty Lecturer"
+                        ).joinToString(" • "),
+                        color = colors.textSecondary,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Medium,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+
+                // The code is what people pass around, so it is a control: a tap
+                // copies it and never opens the class underneath.
+                session.meetingCode?.takeIf { it.isNotBlank() }?.let { code ->
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(6.dp))
+                            .background(colors.primary.copy(alpha = 0.10f))
+                            .clickable { copyToClipboard(context, "Class code", code) }
+                            .padding(horizontal = 6.dp, vertical = 4.dp)
+                    ) {
+                        Text(
+                            text = code,
+                            color = colors.primary,
+                            fontSize = 9.sp,
+                            fontWeight = FontWeight.Bold,
+                            fontFamily = FontFamily.Monospace
+                        )
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Icon(
+                            imageVector = Icons.Default.ContentCopy,
+                            contentDescription = "Copy class code",
+                            tint = colors.primary,
+                            modifier = Modifier.size(10.dp)
+                        )
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(11.dp))
+
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                if (isLive) {
+                    Surface(color = colors.primary, shape = RoundedCornerShape(4.dp)) {
+                        Text(
+                            text = "LIVE",
+                            color = Color.White,
+                            fontSize = 9.sp,
+                            fontWeight = FontWeight.Black,
+                            letterSpacing = 1.sp,
+                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                        )
+                    }
+                    Spacer(modifier = Modifier.width(8.dp))
+                }
+
+                if (session.attendeeCount > 0) {
+                    Text(
+                        text = "${session.presentCount}/${session.attendeeCount} present",
+                        color = colors.textSecondary,
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Medium
+                    )
+                } else if (!isLive) {
+                    Text(
+                        text = "Not started",
+                        color = colors.textTertiary,
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Medium
+                    )
+                }
+
+                Spacer(modifier = Modifier.weight(1f))
+
+                // Host controls keep their own space, and a full 40dp touch
+                // target, so ending a class is a deliberate tap.
+                if (canManage) {
+                    if (isLive) {
+                        IconButton(onClick = onEnd, modifier = Modifier.size(40.dp)) {
+                            Icon(
+                                imageVector = Icons.Default.StopCircle,
+                                contentDescription = "End class",
+                                tint = colors.textSecondary,
+                                modifier = Modifier.size(19.dp)
+                            )
+                        }
+                    }
+                    IconButton(onClick = onDelete, modifier = Modifier.size(40.dp)) {
+                        Icon(
+                            imageVector = Icons.Default.DeleteOutline,
+                            contentDescription = "Delete class",
+                            tint = colors.error,
+                            modifier = Modifier.size(19.dp)
+                        )
+                    }
+                }
+
+                Text(
+                    text = if (isLive) "Enter" else "Open",
+                    color = colors.primary,
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.padding(start = 4.dp)
+                )
                 Icon(
                     imageVector = Icons.Default.ChevronRight,
-                    contentDescription = "Enter",
-                    tint = Color(0xFF475569)
+                    contentDescription = null,
+                    tint = colors.primary,
+                    modifier = Modifier.size(16.dp)
                 )
             }
         }
     }
+}
+
+@Composable
+fun ConfirmActionDialog(
+    title: String,
+    message: String,
+    confirmLabel: String,
+    onConfirm: () -> Unit,
+    onDismiss: () -> Unit
+) {
+    val colors = AppTheme.colors
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        containerColor = colors.surface,
+        title = {
+            Text(title, color = colors.textPrimary, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+        },
+        text = {
+            Text(message, color = colors.textSecondary, fontSize = 13.sp)
+        },
+        confirmButton = {
+            TextButton(onClick = onConfirm) {
+                Text(confirmLabel, color = colors.error, fontWeight = FontWeight.Bold)
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Cancel", color = colors.textSecondary)
+            }
+        }
+    )
 }
 
 @Composable
@@ -777,137 +983,293 @@ fun PillTabButton(
 @Composable
 fun CreateClassDialog(
     onDismiss: () -> Unit,
-    onCreate: (CreateSessionRequest) -> Unit
+    onCreate: (CreateSessionRequest) -> Unit,
+    defaultLecturer: String = ""
 ) {
+    val colors = AppTheme.colors
     var title by remember { mutableStateOf("") }
     var course by remember { mutableStateOf("") }
+    var lecturer by remember(defaultLecturer) { mutableStateOf(defaultLecturer) }
     var enableAutoAttendance by remember { mutableStateOf(true) }
-    var checkCount by remember { mutableStateOf("3") }
-    var timeLimit by remember { mutableStateOf("30") }
-    var intervalMinutes by remember { mutableStateOf("15") }
+    // Chosen from chips instead of typed. Three number fields side by side were
+    // too narrow to read on a phone, and every one of them raised the keyboard
+    // over the Create button.
+    var checkCount by remember { mutableStateOf(3) }
+    var timeLimit by remember { mutableStateOf(30) }
+    var intervalMinutes by remember { mutableStateOf(15) }
 
-    Dialog(onDismissRequest = onDismiss) {
-        Card(
-            shape = RoundedCornerShape(16.dp),
-            colors = CardDefaults.cardColors(containerColor = Color(0xFF111522)),
+    Dialog(
+        onDismissRequest = onDismiss,
+        // The dialog handles its own insets, so imePadding() below reports the
+        // keyboard and the card can move above it rather than having the
+        // Create button buried under it.
+        properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)
+    ) {
+        Box(
+            contentAlignment = Alignment.Center,
             modifier = Modifier
-                .fillMaxWidth()
-                .padding(8.dp)
+                .fillMaxSize()
+                .imePadding()
+                .padding(horizontal = 20.dp, vertical = 24.dp)
         ) {
-            Column(modifier = Modifier.padding(20.dp)) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Text("Create New Class", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold)
-                    IconButton(onClick = onDismiss, modifier = Modifier.size(28.dp)) {
-                        Icon(Icons.Default.Close, contentDescription = "Close", tint = Color(0xFF8888A8))
+            Card(
+                shape = RoundedCornerShape(16.dp),
+                colors = CardDefaults.cardColors(containerColor = colors.surface),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(max = 600.dp)
+                    .border(1.dp, colors.cardBorder, RoundedCornerShape(16.dp))
+            ) {
+                Column {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(start = 20.dp, end = 12.dp, top = 14.dp, bottom = 4.dp)
+                    ) {
+                        Text("Create New Class", color = colors.textPrimary, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+                        IconButton(onClick = onDismiss, modifier = Modifier.size(32.dp)) {
+                            Icon(Icons.Default.Close, contentDescription = "Close", tint = colors.textSecondary)
+                        }
                     }
-                }
 
-                Spacer(modifier = Modifier.height(14.dp))
-
-                OutlinedTextField(
-                    value = title,
-                    onValueChange = { title = it },
-                    label = { Text("Class Title (e.g. Distributed Systems)") },
-                    singleLine = true,
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedTextColor = Color.White,
-                        unfocusedTextColor = Color.White,
-                        focusedBorderColor = Color(0xFF1845D4),
-                        unfocusedBorderColor = Color.White.copy(alpha = 0.12f)
-                    ),
-                    modifier = Modifier.fillMaxWidth()
-                )
-
-                Spacer(modifier = Modifier.height(10.dp))
-
-                OutlinedTextField(
-                    value = course,
-                    onValueChange = { course = it },
-                    label = { Text("Course Code (e.g. CS401)") },
-                    singleLine = true,
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedTextColor = Color.White,
-                        unfocusedTextColor = Color.White,
-                        focusedBorderColor = Color(0xFF1845D4),
-                        unfocusedBorderColor = Color.White.copy(alpha = 0.12f)
-                    ),
-                    modifier = Modifier.fillMaxWidth()
-                )
-
-                Spacer(modifier = Modifier.height(14.dp))
-
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Checkbox(
-                        checked = enableAutoAttendance,
-                        onCheckedChange = { enableAutoAttendance = it },
-                        colors = CheckboxDefaults.colors(checkedColor = Color(0xFF1845D4))
-                    )
-                    Text("Enable Automated Attendance", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
-                }
-
-                if (enableAutoAttendance) {
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                    // The form scrolls, so a short phone with the keyboard up
+                    // still reaches every setting while the buttons below stay
+                    // pinned where they are.
+                    Column(
+                        modifier = Modifier
+                            .weight(1f, fill = false)
+                            .verticalScroll(rememberScrollState())
+                            .padding(horizontal = 20.dp)
+                    ) {
                         OutlinedTextField(
-                            value = checkCount,
-                            onValueChange = { checkCount = it },
-                            label = { Text("Checks") },
+                            value = title,
+                            onValueChange = { title = it },
+                            label = { Text("Class title") },
+                            placeholder = { Text("e.g. Distributed Systems", fontSize = 13.sp) },
                             singleLine = true,
-                            colors = OutlinedTextFieldDefaults.colors(focusedTextColor = Color.White, unfocusedTextColor = Color.White),
-                            modifier = Modifier.weight(1f)
+                            keyboardOptions = KeyboardOptions(
+                                capitalization = KeyboardCapitalization.Sentences,
+                                imeAction = ImeAction.Next
+                            ),
+                            colors = createDialogFieldColors(),
+                            modifier = Modifier.fillMaxWidth()
                         )
-                        OutlinedTextField(
-                            value = timeLimit,
-                            onValueChange = { timeLimit = it },
-                            label = { Text("Limit (s)") },
-                            singleLine = true,
-                            colors = OutlinedTextFieldDefaults.colors(focusedTextColor = Color.White, unfocusedTextColor = Color.White),
-                            modifier = Modifier.weight(1f)
-                        )
-                        OutlinedTextField(
-                            value = intervalMinutes,
-                            onValueChange = { intervalMinutes = it },
-                            label = { Text("Interval (m)") },
-                            singleLine = true,
-                            colors = OutlinedTextFieldDefaults.colors(focusedTextColor = Color.White, unfocusedTextColor = Color.White),
-                            modifier = Modifier.weight(1f)
-                        )
-                    }
-                }
 
-                Spacer(modifier = Modifier.height(20.dp))
+                        Spacer(modifier = Modifier.height(10.dp))
 
-                Button(
-                    onClick = {
-                        if (title.isNotBlank()) {
-                            val autoSettings = if (enableAutoAttendance) {
-                                AutoAttendanceSettingsDto(
-                                    enabled = true,
-                                    checkCount = checkCount.toIntOrNull() ?: 3,
-                                    timeLimitSeconds = timeLimit.toIntOrNull() ?: 30,
-                                    intervalMinutes = intervalMinutes.toIntOrNull() ?: 15
-                                )
-                            } else null
-
-                            onCreate(
-                                CreateSessionRequest(
-                                    title = title.trim(),
-                                    course = course.trim().ifEmpty { "General" },
-                                    autoAttendanceSettings = autoSettings ?: AutoAttendanceSettingsDto(enabled = false)
-                                )
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            OutlinedTextField(
+                                value = course,
+                                onValueChange = { course = it },
+                                label = { Text("Course code") },
+                                placeholder = { Text("CS401", fontSize = 13.sp) },
+                                singleLine = true,
+                                keyboardOptions = KeyboardOptions(
+                                    capitalization = KeyboardCapitalization.Characters,
+                                    imeAction = ImeAction.Next
+                                ),
+                                colors = createDialogFieldColors(),
+                                modifier = Modifier.weight(1f)
+                            )
+                            OutlinedTextField(
+                                value = lecturer,
+                                onValueChange = { lecturer = it },
+                                label = { Text("Lecturer") },
+                                placeholder = { Text("Your name", fontSize = 13.sp) },
+                                singleLine = true,
+                                keyboardOptions = KeyboardOptions(
+                                    capitalization = KeyboardCapitalization.Words,
+                                    imeAction = ImeAction.Done
+                                ),
+                                colors = createDialogFieldColors(),
+                                modifier = Modifier.weight(1f)
                             )
                         }
-                    },
-                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1845D4)),
-                    shape = RoundedCornerShape(8.dp),
+
+                        Spacer(modifier = Modifier.height(14.dp))
+
+                        // Automated attendance as one card: a switch, and, when
+                        // it is on, the three settings as tap targets.
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(12.dp))
+                                .background(colors.surfaceElevated)
+                                .border(1.dp, colors.cardBorder, RoundedCornerShape(12.dp))
+                                .padding(14.dp)
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text("Automated attendance", color = colors.textPrimary, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                                    Text(
+                                        "Queues presence checks while the class runs",
+                                        color = colors.textSecondary,
+                                        fontSize = 11.sp,
+                                        modifier = Modifier.padding(top = 2.dp)
+                                    )
+                                }
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Switch(
+                                    checked = enableAutoAttendance,
+                                    onCheckedChange = { enableAutoAttendance = it },
+                                    colors = SwitchDefaults.colors(checkedTrackColor = colors.primary)
+                                )
+                            }
+
+                            if (enableAutoAttendance) {
+                                Spacer(modifier = Modifier.height(14.dp))
+                                SettingChips(
+                                    label = "Checks per class",
+                                    options = listOf(1, 2, 3, 4, 5),
+                                    selected = checkCount,
+                                    optionText = { "$it" },
+                                    onSelect = { checkCount = it }
+                                )
+                                Spacer(modifier = Modifier.height(12.dp))
+                                SettingChips(
+                                    label = "Answer window",
+                                    options = listOf(15, 30, 45, 60),
+                                    selected = timeLimit,
+                                    optionText = { "${it}s" },
+                                    onSelect = { timeLimit = it }
+                                )
+                                Spacer(modifier = Modifier.height(12.dp))
+                                SettingChips(
+                                    label = "Every",
+                                    options = listOf(5, 10, 15, 30),
+                                    selected = intervalMinutes,
+                                    optionText = { "${it}m" },
+                                    onSelect = { intervalMinutes = it }
+                                )
+                            }
+                        }
+                    }
+
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(start = 20.dp, end = 20.dp, top = 12.dp, bottom = 18.dp)
+                    ) {
+                        Text(
+                            text = if (title.isBlank()) {
+                                "Add a title to create the class"
+                            } else {
+                                "Students join with the class code"
+                            },
+                            color = colors.textSecondary,
+                            fontSize = 11.sp,
+                            modifier = Modifier.weight(1f)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        TextButton(onClick = onDismiss) {
+                            Text("Cancel", color = colors.textSecondary, fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
+                        }
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Button(
+                            onClick = {
+                                val autoSettings = if (enableAutoAttendance) {
+                                    AutoAttendanceSettingsDto(
+                                        enabled = true,
+                                        checkCount = checkCount,
+                                        timeLimitSeconds = timeLimit,
+                                        intervalMinutes = intervalMinutes
+                                    )
+                                } else {
+                                    AutoAttendanceSettingsDto(enabled = false)
+                                }
+
+                                onCreate(
+                                    CreateSessionRequest(
+                                        title = title.trim(),
+                                        course = course.trim().ifEmpty { "General" },
+                                        // Left blank, the field is dropped from the
+                                        // request and the server falls back to the
+                                        // host's own account name.
+                                        lecturerName = lecturer.trim().ifBlank { null },
+                                        autoAttendanceSettings = autoSettings
+                                    )
+                                )
+                            },
+                            // Was always tappable and silently did nothing on an
+                            // empty title; now it says when it can be used.
+                            enabled = title.isNotBlank(),
+                            colors = ButtonDefaults.buttonColors(containerColor = colors.primary),
+                            shape = RoundedCornerShape(8.dp),
+                            contentPadding = PaddingValues(horizontal = 18.dp, vertical = 10.dp)
+                        ) {
+                            Text("Create class", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/** The shared look for the fields in the create-class form. */
+@Composable
+private fun createDialogFieldColors() = OutlinedTextFieldDefaults.colors(
+    focusedTextColor = AppTheme.colors.textPrimary,
+    unfocusedTextColor = AppTheme.colors.textPrimary,
+    focusedContainerColor = AppTheme.colors.surfaceElevated,
+    unfocusedContainerColor = AppTheme.colors.surfaceElevated,
+    focusedBorderColor = AppTheme.colors.primary,
+    unfocusedBorderColor = AppTheme.colors.cardBorder,
+    focusedLabelColor = AppTheme.colors.primary,
+    unfocusedLabelColor = AppTheme.colors.textSecondary,
+    focusedPlaceholderColor = AppTheme.colors.textTertiary,
+    unfocusedPlaceholderColor = AppTheme.colors.textTertiary
+)
+
+/**
+ * One setting as a row of choices.
+ *
+ * Tapping a chip is faster than typing a number on a phone and it cannot be
+ * given a value the scheduler would not understand.
+ */
+@Composable
+private fun SettingChips(
+    label: String,
+    options: List<Int>,
+    selected: Int,
+    optionText: (Int) -> String,
+    onSelect: (Int) -> Unit
+) {
+    val colors = AppTheme.colors
+    Column(modifier = Modifier.fillMaxWidth()) {
+        Text(
+            text = label.uppercase(),
+            color = colors.textSecondary,
+            fontSize = 10.sp,
+            fontWeight = FontWeight.Bold,
+            letterSpacing = 0.8.sp
+        )
+        Spacer(modifier = Modifier.height(6.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+            options.forEach { option ->
+                val isSelected = option == selected
+                Box(
+                    contentAlignment = Alignment.Center,
                     modifier = Modifier
-                        .fillMaxWidth()
-                        .height(48.dp)
+                        .weight(1f)
+                        .height(36.dp)
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(if (isSelected) colors.primary else Color.Transparent)
+                        .border(1.dp, if (isSelected) colors.primary else colors.cardBorder, RoundedCornerShape(8.dp))
+                        .clickable { onSelect(option) }
                 ) {
-                    Text("Create & Launch Session", fontWeight = FontWeight.Bold)
+                    Text(
+                        text = optionText(option),
+                        color = if (isSelected) Color.White else colors.textPrimary,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold
+                    )
                 }
             }
         }
@@ -919,17 +1281,25 @@ fun WalletDialog(
     balance: Long,
     onDismiss: () -> Unit
 ) {
-    Dialog(onDismissRequest = onDismiss) {
+    val colors = AppTheme.colors
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(usePlatformDefaultWidth = false)
+    ) {
         Card(
             shape = RoundedCornerShape(16.dp),
-            colors = CardDefaults.cardColors(containerColor = Color(0xFF111522)),
-            modifier = Modifier.fillMaxWidth().padding(8.dp)
+            colors = CardDefaults.cardColors(containerColor = colors.surface),
+            modifier = Modifier
+                .fillMaxWidth(0.9f)
+                .widthIn(max = 440.dp)
+                .border(1.dp, colors.cardBorder, RoundedCornerShape(16.dp))
+                .padding(8.dp)
         ) {
             Column(modifier = Modifier.padding(20.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxWidth()) {
-                    Text("My Wallet", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+                    Text("My Wallet", color = colors.textPrimary, fontSize = 18.sp, fontWeight = FontWeight.Bold)
                     IconButton(onClick = onDismiss, modifier = Modifier.size(28.dp)) {
-                        Icon(Icons.Default.Close, contentDescription = "Close", tint = Color(0xFF8888A8))
+                        Icon(Icons.Default.Close, contentDescription = "Close", tint = colors.textSecondary)
                     }
                 }
 
@@ -937,18 +1307,18 @@ fun WalletDialog(
 
                 Card(
                     shape = RoundedCornerShape(12.dp),
-                    colors = CardDefaults.cardColors(containerColor = Color(0xFF0D0D1A)),
+                    colors = CardDefaults.cardColors(containerColor = colors.surfaceElevated),
                     modifier = Modifier.fillMaxWidth().border(1.dp, Color(0xFF10B981).copy(alpha = 0.3f), RoundedCornerShape(12.dp))
                 ) {
                     Column(modifier = Modifier.padding(16.dp)) {
                         Text("AVAILABLE BALANCE", color = Color(0xFF10B981), fontSize = 10.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
                         Spacer(modifier = Modifier.height(6.dp))
-                        Text("GHS ${(balance / 100.0).formatDec()}", color = Color.White, fontSize = 28.sp, fontWeight = FontWeight.ExtraBold)
+                        Text("GHS ${(balance / 100.0).formatDec()}", color = colors.textPrimary, fontSize = 28.sp, fontWeight = FontWeight.ExtraBold)
                     }
                 }
 
                 Spacer(modifier = Modifier.height(16.dp))
-                Text("Quick Deposit / Paystack Top-Up", color = Color(0xFF8888A8), fontSize = 12.sp, fontWeight = FontWeight.Medium)
+                Text("Quick Deposit / Paystack Top-Up", color = colors.textSecondary, fontSize = 12.sp, fontWeight = FontWeight.Medium)
                 Spacer(modifier = Modifier.height(8.dp))
 
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
@@ -957,9 +1327,9 @@ fun WalletDialog(
                             onClick = {},
                             modifier = Modifier.weight(1f),
                             shape = RoundedCornerShape(8.dp),
-                            border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF334155))
+                            border = androidx.compose.foundation.BorderStroke(1.dp, colors.cardBorder)
                         ) {
-                            Text(amount, color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                            Text(amount, color = colors.textPrimary, fontSize = 12.sp, fontWeight = FontWeight.Bold)
                         }
                     }
                 }
@@ -973,25 +1343,33 @@ fun AttendanceSummaryDialog(
     sessions: List<SessionDto>,
     onDismiss: () -> Unit
 ) {
-    Dialog(onDismissRequest = onDismiss) {
+    val colors = AppTheme.colors
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(usePlatformDefaultWidth = false)
+    ) {
         Card(
             shape = RoundedCornerShape(16.dp),
-            colors = CardDefaults.cardColors(containerColor = Color(0xFF111522)),
-            modifier = Modifier.fillMaxWidth().padding(8.dp)
+            colors = CardDefaults.cardColors(containerColor = colors.surface),
+            modifier = Modifier
+                .fillMaxWidth(0.9f)
+                .widthIn(max = 440.dp)
+                .border(1.dp, colors.cardBorder, RoundedCornerShape(16.dp))
+                .padding(8.dp)
         ) {
             Column(modifier = Modifier.padding(20.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxWidth()) {
-                    Text("Attendance Records", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+                    Text("Attendance Records", color = colors.textPrimary, fontSize = 18.sp, fontWeight = FontWeight.Bold)
                     IconButton(onClick = onDismiss, modifier = Modifier.size(28.dp)) {
-                        Icon(Icons.Default.Close, contentDescription = "Close", tint = Color(0xFF8888A8))
+                        Icon(Icons.Default.Close, contentDescription = "Close", tint = colors.textSecondary)
                     }
                 }
 
                 Spacer(modifier = Modifier.height(16.dp))
                 Card(
                     shape = RoundedCornerShape(12.dp),
-                    colors = CardDefaults.cardColors(containerColor = Color(0xFF0D0D1A)),
-                    modifier = Modifier.fillMaxWidth()
+                    colors = CardDefaults.cardColors(containerColor = colors.surfaceElevated),
+                    modifier = Modifier.fillMaxWidth().border(1.dp, colors.cardBorder, RoundedCornerShape(12.dp))
                 ) {
                     Row(modifier = Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
                         Box(contentAlignment = Alignment.Center, modifier = Modifier.size(48.dp).clip(CircleShape).background(Color(0xFF7C3AED).copy(alpha = 0.2f))) {
@@ -999,8 +1377,8 @@ fun AttendanceSummaryDialog(
                         }
                         Spacer(modifier = Modifier.width(12.dp))
                         Column {
-                            Text("Verified Compliance", color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Bold)
-                            Text("100% verified attendance telemetry", color = Color(0xFF8888A8), fontSize = 11.sp)
+                            Text("Verified Compliance", color = colors.textPrimary, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                            Text("100% verified attendance telemetry", color = colors.textSecondary, fontSize = 11.sp)
                         }
                     }
                 }
@@ -1016,20 +1394,28 @@ fun ProfileDialog(
     onLogout: () -> Unit,
     onDismiss: () -> Unit
 ) {
-    Dialog(onDismissRequest = onDismiss) {
+    val colors = AppTheme.colors
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(usePlatformDefaultWidth = false)
+    ) {
         Card(
             shape = RoundedCornerShape(16.dp),
-            colors = CardDefaults.cardColors(containerColor = Color(0xFF111522)),
-            modifier = Modifier.fillMaxWidth().padding(8.dp)
+            colors = CardDefaults.cardColors(containerColor = colors.surface),
+            modifier = Modifier
+                .fillMaxWidth(0.9f)
+                .widthIn(max = 440.dp)
+                .border(1.dp, colors.cardBorder, RoundedCornerShape(16.dp))
+                .padding(8.dp)
         ) {
             Column(modifier = Modifier.padding(20.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                Box(contentAlignment = Alignment.Center, modifier = Modifier.size(56.dp).clip(CircleShape).background(Color(0xFF1845D4))) {
+                Box(contentAlignment = Alignment.Center, modifier = Modifier.size(56.dp).clip(CircleShape).background(colors.primary)) {
                     Text(userName.take(1).uppercase(), color = Color.White, fontSize = 24.sp, fontWeight = FontWeight.Bold)
                 }
 
                 Spacer(modifier = Modifier.height(10.dp))
-                Text(userName, color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold)
-                Text(if (isLecturer) "Host & Faculty Account" else "Student Account", color = Color(0xFF8888A8), fontSize = 12.sp)
+                Text(userName, color = colors.textPrimary, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+                Text(if (isLecturer) "Host & Faculty Account" else "Student Account", color = colors.textSecondary, fontSize = 12.sp)
 
                 Spacer(modifier = Modifier.height(24.dp))
 
@@ -1041,7 +1427,7 @@ fun ProfileDialog(
                 ) {
                     Icon(Icons.Default.Logout, contentDescription = "Logout", modifier = Modifier.size(16.dp))
                     Spacer(modifier = Modifier.width(6.dp))
-                    Text("Sign Out", fontWeight = FontWeight.Bold)
+                    Text("Sign Out", color = Color.White, fontWeight = FontWeight.Bold)
                 }
             }
         }

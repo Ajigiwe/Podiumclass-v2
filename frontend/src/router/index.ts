@@ -1,6 +1,7 @@
 import { createRouter, createWebHistory, type RouteRecordRaw } from 'vue-router';
 import { useAuthStore } from '../stores/auth';
 import { useFeaturesStore } from '../stores/features';
+import { capturePageview } from '../lib/analytics';
 
 const routes: RouteRecordRaw[] = [
   {
@@ -49,6 +50,11 @@ const routes: RouteRecordRaw[] = [
 export const router = createRouter({
   history: createWebHistory(),
   routes,
+});
+
+// One $pageview per navigation -- funnels and retention are read off these.
+router.afterEach((to) => {
+  capturePageview(to.path);
 });
 
 // Routes that require a signed-in user. Everything else (login) is public.

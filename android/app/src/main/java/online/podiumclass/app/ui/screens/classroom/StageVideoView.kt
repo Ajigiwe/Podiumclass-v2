@@ -14,6 +14,7 @@ import androidx.compose.material.icons.filled.PushPin
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.key
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -54,27 +55,31 @@ fun StageVideoView(
             .clickable { onPinClick() }
     ) {
         if (participant.hasVideo && participant.videoTrack is VideoTrack) {
-            AndroidView(
-                factory = { context ->
-                    TextureViewRenderer(context).apply {
-                        initRenderer(this)
-                        participant.videoTrack.addRenderer(this)
-                    }
-                },
-                update = { view ->
-                    initRenderer(view)
-                    participant.videoTrack.addRenderer(view)
-                },
-                onRelease = { view ->
-                    try {
-                        participant.videoTrack.removeRenderer(view)
-                        view.release()
-                    } catch (e: Exception) {
-                        e.printStackTrace()
-                    }
-                },
-                modifier = Modifier.fillMaxSize()
-            )
+            val track = participant.videoTrack
+            key(track) {
+                AndroidView(
+                    factory = { context ->
+                        TextureViewRenderer(context).apply {
+                            try {
+                                initRenderer(this)
+                                track.addRenderer(this)
+                            } catch (e: Exception) {
+                                e.printStackTrace()
+                            }
+                        }
+                    },
+                    update = { /* Renderer is bound to track for this key's lifecycle */ },
+                    onRelease = { view ->
+                        try {
+                            track.removeRenderer(view)
+                            view.release()
+                        } catch (e: Exception) {
+                            e.printStackTrace()
+                        }
+                    },
+                    modifier = Modifier.fillMaxSize()
+                )
+            }
         } else {
             // Avatar Fallback
             Box(
@@ -187,6 +192,71 @@ fun StageVideoView(
                     )
                 }
             }
+        }
+    }
+}
+
+/**
+ * The tile that stands in for everyone the stage is not drawing.
+ *
+ * A class can hold hundreds of people, and a phone cannot give 200 of them a
+ * legible tile -- past a handful each one is a sliver. So the grid keeps the
+ * people who matter most (you, the host, anyone sharing or on camera, anyone
+ * with a hand up) and gathers the rest here: a few faces, the count, and one
+ * tap through to the full roster.
+ */
+@Composable
+fun StageOverflowTile(
+    hiddenCount: Int,
+    preview: List<ParticipantTileState>,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Box(
+        contentAlignment = Alignment.Center,
+        modifier = modifier
+            .clip(RoundedCornerShape(16.dp))
+            .background(SurfaceDark)
+            .border(1.dp, CardBorder, RoundedCornerShape(16.dp))
+            .clickable { onClick() }
+    ) {
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center,
+            modifier = Modifier.padding(8.dp)
+        ) {
+            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                preview.take(3).forEach { p ->
+                    Box(
+                        contentAlignment = Alignment.Center,
+                        modifier = Modifier
+                            .size(26.dp)
+                            .clip(CircleShape)
+                            .background(IndigoPrimary)
+                    ) {
+                        Text(
+                            text = p.name.take(1).uppercase(),
+                            color = TextPrimary,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                }
+            }
+            Spacer(modifier = Modifier.height(6.dp))
+            Text(
+                text = "+$hiddenCount",
+                color = TextPrimary,
+                fontSize = 18.sp,
+                fontWeight = FontWeight.Black
+            )
+            Text(
+                text = "SEE EVERYONE",
+                color = TextSecondary,
+                fontSize = 9.sp,
+                fontWeight = FontWeight.Bold,
+                letterSpacing = 1.sp
+            )
         }
     }
 }

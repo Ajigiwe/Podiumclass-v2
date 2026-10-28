@@ -1,0 +1,37 @@
+# Production LiveKit server config.
+#
+# deploy/render-config.py fills in the ${...} placeholders from deploy/.env and
+# writes deploy/generated/livekit.yaml (gitignored, because it holds the key).
+# The API key/secret must match LIVEKIT_API_KEY / LIVEKIT_API_SECRET used by
+# Django: the backend signs room tokens with them and this server verifies them.
+
+port: 7880
+bind_addresses:
+  - 0.0.0.0
+
+rtc:
+  # Media fallback for networks that block UDP (some campus/office firewalls).
+  tcp_port: 7881
+  port_range_start: 50000
+  port_range_end: 50100
+  # Docker bridge networking hides the host's public address: without this the
+  # server advertises its 172.17.x container IP, signalling succeeds, and every
+  # camera/microphone fails because no client can reach that address. true lets
+  # LiveKit discover the real public IP through STUN and advertise it instead.
+  #
+  # If outbound STUN is blocked, set LIVEKIT_USE_EXTERNAL_IP=false and add a
+  # static public address here instead:
+  #   node_ip: 203.0.113.10
+  use_external_ip: ${LIVEKIT_USE_EXTERNAL_IP}
+
+# The bus between this server and the egress worker. Recording requests arrive
+# at the server's twirp API and are handed to the worker over Redis.
+redis:
+  address: redis:6379
+
+keys:
+  ${LIVEKIT_API_KEY}: ${LIVEKIT_API_SECRET}
+
+logging:
+  level: info
+  json: true

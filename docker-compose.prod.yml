@@ -1,0 +1,187 @@
+# Production stack for the Podium VPS.
+#
+#   docker compose --env-file deploy/.env -f docker-compose.prod.yml up -d --build
+#
+# (or just ./deploy/deploy.sh, which renders the service configs first).
+#
+# Differences from the dev docker-compose.yml, and why:
+#   * the backend runs gunicorn, not `manage.py runserver`;
+#   * the frontend is a static build served by nginx, not the Vite dev server;
+#   * Caddy terminates TLS for the app and LiveKit, so no port is served over
+#     plain http to the internet;
+#   * Postgres and Redis publish no host port -- only the compose network
+#     reaches them;
+#   * LiveKit, Redis and the Egress worker are part of the stack, so recording
+#     and calls survive a reboot without anyone starting four things by hand.
+
+name: podium
+
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+services:
+  db:
+    image: postgres:16-alpine
+    restart: always
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-podium}
+      POSTGRES_USER: ${POSTGRES_USER:-podium}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set in deploy/.env}
+    volumes:
+      - db_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    logging: *default-logging
+
+  redis:
+    image: redis:7-alpine
+    restart: always
+    # The bus between the LiveKit server and the egress worker. Nothing here is
+    # durable state -- recordings and rooms live elsewhere -- so persistence is
+    # off and a restart costs nothing.
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    logging: *default-logging
+
+  livekit:
+    image: livekit/livekit-server:v1.13.10
+    restart: always
+    command: ["--config", "/etc/livekit/livekit.yaml"]
+    volumes:
+      - ./deploy/generated/livekit.yaml:/etc/livekit/livekit.yaml:ro
+    ports:
+      # Signalling (7880) is NOT published: Caddy reaches it over the compose
+      # network and serves it as wss:// on the LiveKit hostname.
+      - "7881:7881/tcp"
+      - "50000-50100:50000-50100/udp"
+    depends_on:
+      redis:
+        condition: service_healthy
+    logging: *default-logging
+
+  egress:
+    image: livekit/egress:v1.13.0
+    restart: always
+    environment:
+      EGRESS_CONFIG_FILE: /etc/livekit/egress.yaml
+    volumes:
+      - ./deploy/generated/egress.yaml:/etc/livekit/egress.yaml:ro
+      # Same host directory the backend mounts at /data/recordings: the worker
+      # writes the MP4 here and Django serves/deletes it from there.
+      - ./data/recordings:/out/recordings
+    # Chrome composites the room grid; the 64MB default /dev/shm makes it die
+    # partway through a real lecture.
+    shm_size: "1gb"
+    cap_add:
+      - SYS_ADMIN
+    depends_on:
+      livekit:
+        condition: service_started
+      # The worker exits when it cannot reach the bus, so wait for a healthy
+      # Redis rather than burning restarts on a boot race.
+      redis:
+        condition: service_healthy
+    logging: *default-logging
+
+  backend:
+    build:
+      context: ./backend
+    restart: always
+    environment:
+      DJANGO_DEBUG: "False"
+      DJANGO_SECRET_KEY: ${DJANGO_SECRET_KEY:?DJANGO_SECRET_KEY must be set in deploy/.env}
+      ALLOWED_HOSTS: ${APP_DOMAIN},localhost,127.0.0.1
+      CSRF_TRUSTED_ORIGINS: ${APP_ORIGIN}
+      # Same origin in production (nginx proxies /api), so no browser origin
+      # needs to be allowed. Left configurable for a split deployment.
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-}
+      DJANGO_BEHIND_PROXY: "true"
+      # Caddy already redirects http -> https; a second redirect inside Django
+      # would also break the container's own loopback health probe.
+      DJANGO_SECURE_SSL_REDIRECT: "false"
+      # Off until HTTPS is verified: browsers cache HSTS for the whole period,
+      # so enabling it on a broken certificate locks users out. See DEPLOY_VPS.md.
+      DJANGO_SECURE_HSTS_SECONDS: ${DJANGO_SECURE_HSTS_SECONDS:-0}
+
+      USE_POSTGRES: "true"
+      DATABASE_URL: postgresql://${POSTGRES_USER:-podium}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-podium}
+
+      LIVEKIT_API_KEY: ${LIVEKIT_API_KEY:?LIVEKIT_API_KEY must be set in deploy/.env}
+      LIVEKIT_API_SECRET: ${LIVEKIT_API_SECRET:?LIVEKIT_API_SECRET must be set in deploy/.env}
+      LIVEKIT_API_URL: http://livekit:7880
+      LIVEKIT_EGRESS_URL: http://livekit:7880
+      # What browsers and the Android app connect to for media signalling.
+      LIVEKIT_URL: wss://${LIVEKIT_DOMAIN}
+      RECORDINGS_ROOT: /data/recordings
+      RECORDINGS_CONTAINER_PATH: /out/recordings
+      MATERIALS_ROOT: /data/materials
+      AVATARS_ROOT: /data/avatars
+      ATTENDANCE_API_KEY: ${ATTENDANCE_API_KEY:-}
+    volumes:
+      - static:/app/staticfiles
+      - ./data/recordings:/data/recordings
+      - ./data/materials:/data/materials
+      - ./data/avatars:/data/avatars
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    stop_grace_period: 30s
+    logging: *default-logging
+
+  frontend:
+    build:
+      context: ./frontend
+      args:
+        # Same origin: the SPA calls https://<app>/api/v1/... through nginx.
+        VITE_API_URL: ${APP_ORIGIN}
+        VITE_GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+        VITE_GOOGLE_ALLOWED_ORIGINS: ${APP_ORIGIN}
+        VITE_POSTHOG_KEY: ${POSTHOG_KEY:-}
+        VITE_POSTHOG_HOST: ${POSTHOG_HOST:-https://us.i.posthog.com}
+    restart: always
+    volumes:
+      # Django admin CSS/JS, written by collectstatic in the backend container.
+      - static:/var/www/static:ro
+    depends_on:
+      - backend
+    logging: *default-logging
+
+  caddy:
+    image: caddy:2-alpine
+    restart: always
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    environment:
+      APP_DOMAIN: ${APP_DOMAIN}
+      LIVEKIT_DOMAIN: ${LIVEKIT_DOMAIN}
+      ACME_EMAIL: ${ACME_EMAIL}
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      # Certificates and ACME account live here; deleting it means asking
+      # Let's Encrypt for every certificate again.
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - frontend
+      - livekit
+    logging: *default-logging
+
+volumes:
+  db_data:
+  static:
+  caddy_data:
+  caddy_config:

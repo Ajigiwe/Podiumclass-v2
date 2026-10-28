@@ -20,6 +20,14 @@ android {
         vectorDrawables {
             useSupportLibrary = true
         }
+
+        // The server the app talks to on a fresh install. Production by
+        // default, so a release build is usable without touching a setting;
+        // local development overrides it on the command line:
+        //   ./gradlew assembleDebug -PpodiumApiUrl=http://192.168.1.10:8000
+        val podiumApiUrl = (project.findProperty("podiumApiUrl") as String?)
+            ?: "https://podiumclass.online"
+        buildConfigField("String", "DEFAULT_API_URL", "\"$podiumApiUrl\"")
     }
 
     buildTypes {
@@ -40,6 +48,8 @@ android {
     }
     buildFeatures {
         compose = true
+        // DEFAULT_API_URL above is a generated constant.
+        buildConfig = true
     }
     packaging {
         resources {

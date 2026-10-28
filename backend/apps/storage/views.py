@@ -23,30 +23,111 @@ The routes live in ``apps/classrooms/urls.py`` so the whole
 ``/api/v1/classrooms/`` surface stays readable in one place.
 """
 import os
+import re
 import time
 import uuid
+from datetime import datetime
 
+import jwt
 from django.conf import settings
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.core.validators import URLValidator
 from django.http import StreamingHttpResponse
 from django.utils import timezone
 from rest_framework import status
-from rest_framework.permissions import IsAuthenticated
+from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from django.db.models import Q, Subquery
+
 from apps.classrooms.access import can_moderate
-from apps.classrooms.models import Session
+from apps.classrooms.models import CoHost, Session
 from apps.core.guards import require_feature
-from . import egress
+from . import egress, recording_links
 from .models import Recording, SessionMaterial
 from .serializers import MATERIAL_TYPES, SessionMaterialSerializer
+
+
+#: Cap on the dashboard's Records feed. The list is paged by "recent", not by
+#: completeness: a host with hundreds of lectures scrolls their classes for the
+#: old ones rather than making every dashboard load carry them all.
+RECORDINGS_FEED_LIMIT = 100
+
+#: How long a recording may sit in "starting" before it is treated as dead.
+#: A composite pipeline is live within a second or two of joining the room; the
+#: generous ceiling is for a loaded machine starting Chrome, not for a class
+#: that never sends any media.
+STARTUP_TIMEOUT_SECONDS = 60
+
+#: How long a room may have nobody in it before its live recording is closed.
+#: Long enough to cover a host whose laptop dropped off the network and came
+#: back, short enough that a class abandoned on Friday is watchable on Monday.
+EMPTY_ROOM_GRACE_SECONDS = 180
+
+#: How often a live recording asks the room who is in it. Every status poll
+#: asking would double the traffic of a running lecture for no new answer.
+PRESENCE_CHECK_SECONDS = 30
 
 
 def _can_manage_materials(user, session) -> bool:
     """Host, lecturer, admin, or an active co-host -- see classrooms.access."""
     return can_moderate(user, session)
+
+
+_SAFE_SUFFIX = re.compile(r"^[A-Za-z0-9]{1,10}$")
+
+
+def _material_file_token(material_id: str) -> str:
+    """
+    A JWT authorising anonymous-but-signed download of one material file.
+
+    The modal opens an uploaded file with a plain anchor, and a navigation
+    cannot attach an Authorization header -- so instead of dropping auth on
+    the file route, each uploaded file gets a self-authorising token bound to
+    its material id. It is signed with the shared SECRET_KEY (the exact model
+    room-join tokens use) and is worthless for any other material or endpoint.
+    """
+    return jwt.encode(
+        {"mat": material_id, "typ": "material-file"},
+        settings.SECRET_KEY,
+        algorithm="HS256",
+    )
+
+
+def _store_upload(fh, material_id: str) -> dict:
+    """
+    Persist one uploaded file under MATERIALS_ROOT.
+
+    The stored name is deterministic -- ``fs_<material id>` plus the original
+    file's safe extension -- so the download view finds the file from the row's
+    id alone and no stored path can ever be trusted or escaped. Filename parts
+    are generated, never taken from the client.
+    """
+    root = os.path.abspath(str(settings.MATERIALS_ROOT))
+    os.makedirs(root, exist_ok=True)
+
+    original = os.path.basename(getattr(fh, "name", "") or "file")
+    ext = ""
+    if "." in original:
+        raw_ext = original.rsplit(".", 1)[1].lower()
+        if _SAFE_SUFFIX.match(raw_ext):
+            ext = f".{raw_ext}"
+
+    stored_name = f"fs_{material_id}{ext}"
+    path = os.path.abspath(os.path.join(root, stored_name))
+    if os.path.dirname(path) != root:
+        raise ValueError("BAD_PATH")
+
+    size = 0
+    with open(path, "wb+") as out:
+        for chunk in fh.chunks():
+            size += len(chunk)
+            if size > settings.MATERIAL_MAX_BYTES:
+                raise ValueError("TOO_LARGE")
+            out.write(chunk)
+
+    return {"path": path, "stored_name": stored_name, "size": size, "original": original}
 
 
 def _session_or_404(session_id):
@@ -103,6 +184,42 @@ class SessionMaterialsView(APIView):
         material_type = (data.get("type") or "link").strip().lower()
         size_bytes = data.get("sizeBytes")
 
+        # --- file upload path -------------------------------------------------
+        # The host's file picker posts multipart/form-data; the stored material
+        # then points at a signed file download on this API rather than a URL.
+        upload = request.FILES.get("file") if hasattr(request, "FILES") else None
+        if upload is not None:
+            material_id = f"mat_{uuid.uuid4().hex}"
+            try:
+                stored = _store_upload(upload, material_id)
+            except ValueError as exc:
+                if str(exc) == "TOO_LARGE":
+                    limit_mb = settings.MATERIAL_MAX_BYTES // (1024 * 1024)
+                    return _bad(f"That file is larger than the {limit_mb} MB limit.")
+                raise
+
+            import mimetypes
+            guessed, _ = mimetypes.guess_type(upload.name or "")
+            material_type = material_type if material_type != "link" else ("pdf" if (guessed or "").endswith("/pdf") else "doc")
+            material = SessionMaterial.objects.create(
+                id=material_id,
+                session=session,
+                title=(title or os.path.basename(stored["original"]))[:255],
+                file_url="",  # replaced at once with a signed absolute URL
+                file_type=material_type[:64],
+                file_size_bytes=stored["size"],
+                uploaded_by=request.user.id,
+                created_at=timezone.now(),
+            )
+            signed = _material_file_token(material.id)
+            relative = f"/api/v1/classrooms/sessions/{session_id}/materials/{material.id}/file/?t={signed}"
+            material.file_url = request.build_absolute_uri(relative)[:1024]
+            material.save(update_fields=["file_url"])
+            return Response(
+                SessionMaterialSerializer(material).data,
+                status=status.HTTP_201_CREATED,
+            )
+
         if not title:
             return _bad("Give the resource a title.")
         if not url:
@@ -141,6 +258,74 @@ class SessionMaterialsView(APIView):
             SessionMaterialSerializer(material).data,
             status=status.HTTP_201_CREATED,
         )
+
+
+class SessionMaterialFileView(APIView):
+    """
+    Stream one uploaded material to the person holding its signed link.
+
+    Authentication here is the material token in the query string rather than
+    the usual header: the modal opens these files with an anchor, and anchor
+    navigation cannot attach an Authorization header. The token is signed with
+    SECRET_KEY and scoped to a single material id, so possession of the link is
+    what authorises the download -- exactly like a presigned object URL.
+    """
+    permission_classes = []  # the signed token in ?t= is the credential
+
+    def get(self, request, session_id, material_id):
+        raw = request.query_params.get("t", "")
+        if not raw:
+            return Response(
+                {"error": {"code": "UNAUTHORIZED",
+                           "message": "Missing material access token."}},
+                status=status.HTTP_401_UNAUTHORIZED,
+            )
+        try:
+            claims = jwt.decode(
+                raw, settings.SECRET_KEY, algorithms=["HS256"]
+            )
+        except jwt.InvalidTokenError:
+            return Response(
+                {"error": {"code": "UNAUTHORIZED",
+                           "message": "This file link is no longer valid."}},
+                status=status.HTTP_401_UNAUTHORIZED,
+            )
+        if claims.get("typ") != "material-file" or claims.get("mat") != material_id:
+            return Response(
+                {"error": {"code": "UNAUTHORIZED",
+                           "message": "This file link belongs to a different resource."}},
+                status=status.HTTP_401_UNAUTHORIZED,
+            )
+        try:
+            material = SessionMaterial.objects.get(id=material_id, session_id=session_id)
+        except SessionMaterial.DoesNotExist:
+            return Response(
+                {"error": {"code": "NOT_FOUND",
+                           "message": "Material not found."}},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        root = os.path.abspath(str(settings.MATERIALS_ROOT))
+        matches = [
+            name for name in os.listdir(root)
+            if name == f"fs_{material_id}" or name.startswith(f"fs_{material_id}.")
+        ] if os.path.isdir(root) else []
+        if len(matches) != 1:
+            return Response(
+                {"error": {"code": "NOT_FOUND",
+                           "message": "The file is not available."}},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+        path = os.path.abspath(os.path.join(root, matches[0]))
+
+
+def _stream_file_any(path, request):
+    """_stream_file with the file's own content type instead of a fixed MP4."""
+    import mimetypes
+    guessed, _ = mimetypes.guess_type(path)
+    response = _stream_file(path, request)
+    response["Content-Type"] = guessed or "application/octet-stream"
+    return response
 
 
 class SessionMaterialDetailView(APIView):
@@ -190,9 +375,27 @@ def _local_file(rec):
     return path
 
 
-def _recording_payload(rec, request=None) -> dict:
+def _recording_payload(rec, request=None, user=None) -> dict:
     path = _local_file(rec)
     on_disk = bool(path and os.path.exists(path))
+    playable = rec.status == "complete" and on_disk
+
+    # Watch links are minted for anyone who may see the shelf; download links
+    # only for the people running the class. A media element cannot send an
+    # Authorization header, so without a signed link the player has no. See
+    # recording_links for why the URL carries the credential.
+    play_url = recording_links.file_url(request, rec.session_id, rec.id, recording_links.MODE_PLAY) if playable else None
+    can_download = bool(
+        playable
+        and user is not None
+        and getattr(user, "is_authenticated", False)
+        and can_moderate(user, rec.session)
+    )
+    download_url = (
+        recording_links.file_url(request, rec.session_id, rec.id, recording_links.MODE_DOWNLOAD)
+        if can_download else None
+    )
+
     return {
         "id": rec.id,
         "sessionId": rec.session_id,
@@ -200,18 +403,23 @@ def _recording_payload(rec, request=None) -> dict:
         "status": rec.status,
         # The UI draws a pulsing dot for these and polls while one is live.
         "isLive": rec.status in egress.LIVE_STATUSES,
-        "canPlay": rec.status == "complete" and on_disk,
-        "error": (rec.metadata or {}).get("error") or None,
+        "canPlay": playable,
+        # Normalised on the way out too: a row written before the wording was
+        # mapped still holds the worker's own sentence.
+        "error": egress.friendly_error((rec.metadata or {}).get("error")) or None,
         "startedAt": rec.started_at.isoformat() if rec.started_at else None,
         "endedAt": rec.ended_at.isoformat() if rec.ended_at else None,
-        "durationSeconds": rec.duration_seconds,
+        # Normalised on read as well as on write: rows saved before the unit
+        # was handled still carry a raw nanosecond figure.
+        "durationSeconds": egress.as_seconds(rec.duration_seconds),
         "sizeBytes": rec.size_bytes,
-        "fileUrl": (
-            request.build_absolute_uri(
-                f"/api/v1/classrooms/sessions/{rec.session_id}/recordings/{rec.id}/file/"
-            )
-            if (request is not None and rec.status == "complete" and on_disk) else None
-        ),
+        "playUrl": play_url,
+        "downloadUrl": download_url,
+        # Whether *this* caller may save and pass the file on.
+        "canDownload": can_download,
+        "fileName": os.path.basename(rec.file_path) if rec.file_path else None,
+        # Kept for older clients that read fileUrl; it is the watch link.
+        "fileUrl": play_url,
     }
 
 
@@ -240,6 +448,118 @@ def _apply_snapshot(rec, info) -> None:
     rec.save()
 
 
+def _startup_expired(rec) -> bool:
+    if not rec.started_at:
+        return False
+    return (timezone.now() - rec.started_at).total_seconds() >= STARTUP_TIMEOUT_SECONDS
+
+
+def _abandon_start(rec) -> None:
+    """
+    Give up on a pipeline that never started capturing.
+
+    Room composite recording begins on the first published track, so a class
+    where nobody turns on a microphone or camera leaves the worker waiting in
+    EGRESS_STARTING indefinitely -- the row that reads to a host as "stuck on
+    starting". Nothing will ever be written to that file, so the row is closed
+    with the reason, and the job is stopped so it does not sit in the worker's
+    queue forever.
+    """
+    rec.status = "failed"
+    rec.ended_at = rec.ended_at or timezone.now()
+    rec.metadata = {
+        **(rec.metadata or {}),
+        "error": egress.NOTHING_TO_RECORD_MESSAGE,
+    }
+    rec.save()
+    if not rec.egress_id:
+        return
+    try:
+        egress.stop(rec.egress_id)
+    except (egress.RecordingUnavailable, egress.RecordingRejected):
+        # The row already tells the truth; a worker that cannot answer is not
+        # allowed to hold the shelf open.
+        pass
+
+
+def _parse_moment(value):
+    """Parse an ISO timestamp we wrote into metadata, tolerating junk."""
+    if not value:
+        return None
+    try:
+        moment = datetime.fromisoformat(str(value))
+    except (TypeError, ValueError):
+        return None
+    return moment if timezone.is_aware(moment) else timezone.make_aware(moment)
+
+
+def _autosave_empty_room(rec) -> None:
+    """
+    Finalise a recording whose class has nobody left in it.
+
+    A room-composite MP4 is written by the worker, not by the host's laptop, so
+    nothing about the host closing the lid stops it: the file keeps growing and
+    is never finalised into something a person can watch. That is the case this
+    covers -- host gone, class never ended.
+
+    The rule is deliberately slow. Losing a connection for a few seconds is
+    normal and must not end a lecture, so the room is only asked about once
+    every ``PRESENCE_CHECK_SECONDS`` and the take only closes after it has been
+    empty for ``EMPTY_ROOM_GRACE_SECONDS``. A reconnect inside that window
+    clears the clock and the recording simply carries on.
+
+    When the question cannot be answered (old server, worker restarting), the
+    recording is left exactly as it is: a transient failure must never look
+    like an empty class.
+    """
+    if rec.status != "active" or not rec.egress_id:
+        return
+
+    now = timezone.now()
+    meta = dict(rec.metadata or {})
+
+    checked = _parse_moment(meta.get("presence_checked_at"))
+    if checked and (now - checked).total_seconds() < PRESENCE_CHECK_SECONDS:
+        return
+
+    media = egress.room_media(rec.session_id)
+    if media is None:
+        return
+
+    meta["presence_checked_at"] = now.isoformat()
+
+    if media.get("people", 0) > 0:
+        meta.pop("empty_since", None)
+        rec.metadata = meta
+        rec.save(update_fields=["metadata"])
+        return
+
+    empty_since = _parse_moment(meta.get("empty_since"))
+    if empty_since is None:
+        meta["empty_since"] = now.isoformat()
+        rec.metadata = meta
+        rec.save(update_fields=["metadata"])
+        return
+
+    if (now - empty_since).total_seconds() < EMPTY_ROOM_GRACE_SECONDS:
+        rec.metadata = meta
+        rec.save(update_fields=["metadata"])
+        return
+
+    try:
+        info = egress.stop(rec.egress_id)
+    except (egress.RecordingUnavailable, egress.RecordingRejected):
+        # The row keeps counting from the same empty_since; the next read tries
+        # again. Nothing is marked saved that was not stopped.
+        return
+
+    _apply_snapshot(rec, info)
+    meta.pop("empty_since", None)
+    meta["auto_saved"] = True
+    rec.metadata = meta
+    rec.save(update_fields=["metadata"])
+
+
 def _refresh(rec):
     """
     Pull the worker's view of a recording that is still running.
@@ -259,6 +579,10 @@ def _refresh(rec):
 
     if info:
         _apply_snapshot(rec, info)
+        if rec.status == "starting" and _startup_expired(rec):
+            _abandon_start(rec)
+        elif rec.status == "active":
+            _autosave_empty_room(rec)
         return rec
 
     # The worker has no memory of this id (fresh Redis, rebuilt container).
@@ -363,7 +687,9 @@ class SessionRecordingsView(APIView):
         rows = list(session.recordings.order_by("-created_at"))
         for row in rows:
             _refresh(row)
-        return Response({"documents": [_recording_payload(r, request) for r in rows]})
+        return Response({
+            "documents": [_recording_payload(r, request, request.user) for r in rows]
+        })
 
     def post(self, request, session_id):
         require_feature("recordings")
@@ -389,7 +715,26 @@ class SessionRecordingsView(APIView):
         if running is not None:
             _refresh(running)
             if running.status in egress.LIVE_STATUSES:
-                return Response(_recording_payload(running, request))
+                return Response(_recording_payload(running, request, request.user))
+
+        # A composite recording begins on the first published track. Starting
+        # one over a room where nobody is sending audio or video produces a job
+        # that waits in "starting" until someone stops it -- which is exactly
+        # what a host experiences as a recording stuck on starting. Say so now,
+        # while they are still in the room to switch a microphone on.
+        media = egress.room_media(session.id)
+        if media is not None and media.get("publishing", 0) == 0:
+            return Response(
+                {"error": {
+                    "code": "NOTHING_TO_RECORD",
+                    "message": (
+                        "Nobody in this class is sending audio or video yet, so "
+                        "there is nothing to record. Turn on your microphone or "
+                        "camera, then start the recording."
+                    ),
+                }},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
         filename = f"{session.id}-{int(time.time())}.mp4"
         container_path = f"{settings.RECORDINGS_CONTAINER_PATH.rstrip('/')}/{filename}"
@@ -430,7 +775,10 @@ class SessionRecordingsView(APIView):
             started_at=timezone.now(),
             created_at=timezone.now(),
         )
-        return Response(_recording_payload(recording, request), status=status.HTTP_201_CREATED)
+        return Response(
+            _recording_payload(recording, request, request.user),
+            status=status.HTTP_201_CREATED,
+        )
 
 
 class SessionRecordingDetailView(APIView):
@@ -455,7 +803,7 @@ class SessionRecordingDetailView(APIView):
                 status=status.HTTP_404_NOT_FOUND,
             )
         _refresh(recording)
-        return Response(_recording_payload(recording, request))
+        return Response(_recording_payload(recording, request, request.user))
 
 
 class SessionRecordingStopView(APIView):
@@ -488,11 +836,34 @@ class SessionRecordingStopView(APIView):
 
         if recording.status not in egress.LIVE_STATUSES:
             _refresh(recording)
-            return Response(_recording_payload(recording, request))
+            return Response(_recording_payload(recording, request, request.user))
+
+        # A stop that lands in the first second or two -- exactly what happens
+        # when someone presses record and then stop to see if it worked -- used
+        # to reach the worker while its pipeline was still starting, which
+        # aborts the take. Wait for capture before asking it to end.
+        if recording.status == "starting":
+            info = egress.wait_for_capture(recording.egress_id)
+            if info:
+                _apply_snapshot(recording, info)
+                if recording.status not in egress.LIVE_STATUSES:
+                    return Response(_recording_payload(recording, request, request.user))
 
         try:
             info = egress.stop(recording.egress_id)
         except egress.RecordingRejected as exc:
+            if egress.is_pipeline_abort(exc.message):
+                # Nothing was ever captured, so there is no take to finalise and
+                # no point quoting the worker at the host. The row says what
+                # happened in plain words; the shelf stays honest either way.
+                recording.status = "failed"
+                recording.ended_at = recording.ended_at or timezone.now()
+                recording.metadata = {
+                    **(recording.metadata or {}),
+                    "error": egress.PIPELINE_ABORT_MESSAGE,
+                }
+                recording.save()
+                return Response(_recording_payload(recording, request, request.user))
             return Response(
                 {"error": {"code": "RECORDING_REJECTED", "message": exc.message}},
                 status=status.HTTP_400_BAD_REQUEST,
@@ -506,15 +877,96 @@ class SessionRecordingStopView(APIView):
         _apply_snapshot(recording, info)
         # The worker answers EGRESS_ENDING; the file is finalised afterwards,
         # so the client keeps polling the detail route until it reads complete.
-        return Response(_recording_payload(recording, request))
+        return Response(_recording_payload(recording, request, request.user))
+
+
+class MyRecordingsView(APIView):
+    """
+    GET /api/v1/classrooms/recordings/
+
+    Every recording in the classes this user runs, newest first, wrapped in
+    ``documents``.
+
+    The dashboard's Records area needs this in one request. Asking per class
+    would be a request per class on every dashboard load, and the whole list
+    is one indexed query on a small table (a recording row is a few hundred
+    bytes; the MP4 is not in the database).
+
+    Only the people who run a class see its recordings here, which is also what
+    makes the download links in the payload host-only: they are minted per
+    caller, and a participant never receives one.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        require_feature("recordings")
+
+        hosted = Session.objects.filter(
+            Q(host=request.user) | Q(lecturer=request.user)
+        ).values("id")
+        cohosted = CoHost.objects.filter(
+            user=request.user, is_active=True
+        ).values("session_id")
+        sessions = Session.objects.filter(Q(id__in=Subquery(hosted)) | Q(id__in=Subquery(cohosted)))
+
+        rows = list(
+            Recording.objects
+            .filter(session__in=sessions)
+            .select_related("session")
+            .order_by("-created_at")[:RECORDINGS_FEED_LIMIT]
+        )
+        # Only live rows cost a worker call; a finished one is answered from
+        # the row, so opening the dashboard does not fan out to egress.
+        for row in rows:
+            _refresh(row)
+
+        return Response({
+            "documents": [_recording_payload(r, request, request.user) for r in rows]
+        })
 
 
 class SessionRecordingFileView(APIView):
-    """Stream the MP4 for one recording to anyone signed into the class."""
-    permission_classes = [IsAuthenticated]
+    """
+    Stream the MP4 for one recording.
+
+    Authenticated two ways, because the callers are different kinds of client:
+
+    * ``Authorization: Bearer`` -- an API client that can set headers; or
+    * ``?t=<signed link>`` -- a media element, a download link or the phone's
+      download manager, none of which can send a header. The link names one
+      recording and one purpose (see recording_links), so it cannot be edited
+      into access to another recording, and a play link cannot be turned into a
+      forced download or vice versa.
+    """
+    # AllowAny, not IsAuthenticated: the credential may be the signed link in
+    # the query string, which DRF's authenticators never look at. The view then
+    # requires one of the two -- see the check below.
+    permission_classes = [AllowAny]
 
     def get(self, request, session_id, recording_id):
         require_feature("recordings")
+        # AllowAny above, so the check happens here: a request needs either a
+        # valid link for *this* recording, or a signed-in user. A request with
+        # neither is refused -- the file is never served on possession of a URL
+        # alone.
+        link = recording_links.verify(
+            request.query_params.get("t") or "", session_id, recording_id
+        )
+        signed_in = bool(getattr(request.user, "is_authenticated", False))
+        if link is None and not signed_in:
+            return Response(
+                {
+                    "error": {
+                        "code": "LINK_REQUIRED",
+                        "message": (
+                            "This recording needs a fresh link or a signed-in session. "
+                            "Open the class to get one."
+                        ),
+                    }
+                },
+                status=status.HTTP_401_UNAUTHORIZED,
+            )
+
         session, error = _session_or_404(session_id)
         if error:
             return error
@@ -532,4 +984,11 @@ class SessionRecordingFileView(APIView):
                            "message": "The video file for this recording is not available."}},
                 status=status.HTTP_404_NOT_FOUND,
             )
-        return _stream_file(path, request)
+
+        response = _stream_file(path, request)
+        # Inline for watching, attachment for saving. It comes from the link's
+        # purpose, so a shared watch link cannot silently become a file drop.
+        mode = (link or {}).get("mode") or recording_links.MODE_PLAY
+        filename = os.path.basename(recording.file_path or "recording.mp4")
+        response["Content-Disposition"] = recording_links.content_disposition(filename, mode)
+        return response

@@ -63,10 +63,14 @@ services:
     build:
       context: ./frontend
       dockerfile: Dockerfile
+      # The Dockerfile's default target is a production static build served by
+      # nginx; development needs Vite's dev server, which is the `dev` stage.
+      target: dev
     container_name: podium_frontend
     restart: always
     ports:
-      - "5173:5173"
+      # Matches the port in frontend/vite.config.ts.
+      - "3000:3000"
     environment:
       - VITE_API_URL=${VITE_API_URL:-http://localhost:8000}
     depends_on:

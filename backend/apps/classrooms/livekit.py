@@ -1,7 +1,12 @@
 import time
 import json
+import logging
+
 import jwt
+import requests
 from django.conf import settings
+
+logger = logging.getLogger(__name__)
 
 def generate_livekit_token(
     room_name: str,
@@ -37,7 +42,13 @@ def generate_livekit_token(
     identity = participant_id or f"user_{int(time.time() * 1000)}"
     now = int(time.time())
 
-    is_lecturer = (role.lower() == "lecturer" or role.lower() == "host")
+    # 'admin' belongs here with the hosts: the rest of the backend already
+    # treats an admin as the session's authority (see classrooms.access), and
+    # LiveKit decides on the grant, not on our opinion. Leaving admin out issued
+    # a student-shaped token to an administrator hosting a class, so every
+    # LiveKit-side room action they took -- moderation, clearing the room -- was
+    # refused as unauthenticated.
+    is_lecturer = role.lower() in ("lecturer", "host", "admin")
 
     video_grant = {
         "room": room_name,
@@ -70,3 +81,56 @@ def generate_livekit_token(
 
     token = jwt.encode(payload, api_secret, algorithm="HS256")
     return token, identity
+
+
+def livekit_api_url() -> str:
+    """Base HTTP(S) URL of the LiveKit server, or '' when it is not configured."""
+    return (getattr(settings, "LIVEKIT_API_URL", "") or "").rstrip("/")
+
+
+def delete_livekit_room(room_name: str) -> bool:
+    """
+    Delete a LiveKit room, which disconnects everyone inside it.
+
+    Ending a class has to clear the room, not just flip a flag: each participant
+    holds their own WebRTC session, so a database-only "end" left the room live
+    and a student could keep talking in a lecture the host had finished -- and
+    simply walk back in.
+
+    Best effort: a LiveKit server that is down or misconfigured must never stop
+    a host from ending their own class. Returns whether the room was removed.
+    """
+    base = livekit_api_url()
+    if not base or not room_name:
+        return False
+    try:
+        # roomAdmin on this room is what DeleteRoom checks.
+        token, _ = generate_livekit_token(
+            room_name=room_name,
+            participant_name="podium-server",
+            participant_id="podium-server",
+            role="lecturer",
+            ttl_seconds=60,
+        )
+        response = requests.post(
+            f"{base}/twirp/livekit.RoomService/DeleteRoom",
+            json={"room": room_name},
+            headers={
+                "Authorization": f"Bearer {token}",
+                "Content-Type": "application/json",
+            },
+            timeout=5,
+        )
+        if response.status_code == 200:
+            logger.info("LiveKit room %s deleted", room_name)
+            return True
+        logger.warning(
+            "LiveKit refused to delete room %s: %s %s",
+            room_name,
+            response.status_code,
+            response.text[:200],
+        )
+        return False
+    except Exception as exc:  # noqa: BLE001 - never fail the caller's request
+        logger.warning("LiveKit room %s could not be deleted: %s", room_name, exc)
+        return False

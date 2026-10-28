@@ -6,4 +6,8 @@ psycopg>=3.2.0
 psycopg-binary>=3.2.0
 pyjwt>=2.8.0
 requests>=2.31.0
+# Verifies Google sign-in ID tokens (apps/accounts/views.py). It was missing
+# from this list, which only went unnoticed because every development machine
+# already had it installed: the production image failed at import time.
+google-auth>=2.30.0
 gunicorn>=22.0.0

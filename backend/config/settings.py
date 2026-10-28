@@ -227,7 +227,11 @@ TIME_ZONE = 'UTC'
 USE_I18N = True
 USE_TZ = True
 
-STATIC_URL = 'static/'
+# A leading slash matters: the admin is served at /admin/, and a relative
+# STATIC_URL would make the browser request /admin/static/... (which is proxied
+# to Django, which does not serve static files in production) instead of
+# /static/... (which nginx serves). The result was an unstyled admin page.
+STATIC_URL = '/static/'
 STATIC_ROOT = BASE_DIR / 'staticfiles'
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
@@ -269,6 +273,29 @@ CORS_ALLOW_ALL_ORIGINS = not CORS_ALLOWED_ORIGINS and DEBUG
 # Credentials only make sense with an explicit origin allowlist. Authentication
 # here is Bearer-token based, so the browser does not need cookies at all.
 CORS_ALLOW_CREDENTIALS = bool(CORS_ALLOWED_ORIGINS)
+
+# Development: any loopback or private-LAN origin is accepted automatically.
+#
+# A phone or a second machine reaches the dev server by LAN IP, and DHCP hands
+# out a new address whenever the network changes. An explicit allowlist then
+# needed hand-editing on every move, and forgetting it produced the worst
+# failure mode we have: the page loads, then every API call is refused with
+# "No 'Access-Control-Allow-Origin' header is present", which reads as "the web
+# is down" rather than as a CORS misconfiguration.
+#
+# Gated on DEBUG, so a deployed environment still trusts only the explicit
+# CORS_ALLOWED_ORIGINS list -- a private-range origin is meaningless in
+# production and would only widen the surface.
+if DEBUG:
+    CORS_ALLOWED_ORIGIN_REGEXES = [
+        r'^https?://(?:'
+        r'localhost|127\.0\.0\.1|0\.0\.0\.0|\[::1\]|'
+        r'10\.\d{1,3}\.\d{1,3}\.\d{1,3}|'
+        r'192\.168\.\d{1,3}\.\d{1,3}|'
+        r'172\.(?:1[6-9]|2\d|3[01])\.\d{1,3}\.\d{1,3}|'
+        r'[a-zA-Z0-9-]+\.local'
+        r')(?::\d{1,5})?$'
+    ]
 
 if not CORS_ALLOWED_ORIGINS and not DEBUG:
     logger.warning(
@@ -331,3 +358,58 @@ RECORDINGS_ROOT = Path(
     os.getenv('RECORDINGS_ROOT', str(BASE_DIR.parent / '.livekit' / 'recordings'))
 ).resolve()
 RECORDINGS_CONTAINER_PATH = os.getenv('RECORDINGS_CONTAINER_PATH', '/out/recordings')
+
+# Uploaded classroom materials (the host's file picker in the Learning
+# Materials modal) land here instead of a URL: the file is stored on this
+# machine and streamed back through a signed-URL view, the same shape as the
+# recordings shelf. Basenames are only ever derived from a generated id plus a
+# whitelisted extension, so a malicious filename cannot escape the root.
+MATERIALS_ROOT = Path(
+    os.getenv('MATERIALS_ROOT', str(BASE_DIR.parent / '.podium' / 'materials'))
+).resolve()
+# A slides deck or recording is routinely tens of megabytes; a hoarded
+# collection is the real risk, so the per-file cap is generous but bounded.
+MATERIAL_MAX_BYTES = int(os.getenv('MATERIAL_MAX_BYTES', str(100 * 1024 * 1024)))
+
+# Profile pictures. Small enough to cap tightly (an avatar is not a photo
+# library), stored beside the materials rather than in the database: a row
+# holds only the URL that serves the file, so the account record stays small.
+AVATARS_ROOT = Path(
+    os.getenv('AVATARS_ROOT', str(BASE_DIR.parent / '.podium' / 'avatars'))
+).resolve()
+AVATAR_MAX_BYTES = int(os.getenv('AVATAR_MAX_BYTES', str(5 * 1024 * 1024)))
+
+# ---------------------------------------------------------------------------
+# CSRF and logging (deployment concerns)
+# ---------------------------------------------------------------------------
+# In production the admin lives on the same hostname as the app (nginx proxies
+# /admin to this process), so the browser's Origin header is https://<domain>.
+# Django rejects that unless it is trusted explicitly: signing into /admin then
+# fails with "CSRF verification failed" while the API, which authenticates with
+# Bearer tokens, keeps working -- a confusing split that only shows up in
+# production.
+CSRF_TRUSTED_ORIGINS = env_list('CSRF_TRUSTED_ORIGINS')
+
+# Containers log to stdout, so application warnings and errors should appear in
+# `docker compose logs backend` at the level they were emitted, not only when
+# DEBUG happens to be on. Gunicorn writes its own access log separately.
+LOGGING = {
+    'version': 1,
+    'disable_existing_loggers': False,
+    'formatters': {
+        'plain': {'format': '[{levelname}] {name}: {message}', 'style': '{'},
+    },
+    'handlers': {
+        'console': {'class': 'logging.StreamHandler', 'formatter': 'plain'},
+    },
+    'root': {'handlers': ['console'], 'level': 'INFO'},
+    'loggers': {
+        # Without this, an unhandled error is logged once by django.request and
+        # then propagated to root, printing the same traceback twice.
+        'django.request': {
+            'handlers': ['console'],
+            'level': 'ERROR',
+            'propagate': False,
+        },
+    },
+}

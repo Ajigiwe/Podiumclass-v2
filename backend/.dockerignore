@@ -1,0 +1,16 @@
+# Keep the image small and free of local state.
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+db.sqlite3
+db.sqlite3*
+*.bak
+staticfiles/
+media/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.env
+.env.*
+!.env.example

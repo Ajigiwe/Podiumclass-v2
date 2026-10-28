@@ -1,5 +1,6 @@
 import uuid
 from django.conf import settings
+from django.db.models import Q, Subquery
 from django.utils import timezone
 from rest_framework import status
 from rest_framework.permissions import IsAuthenticated
@@ -18,6 +19,10 @@ from .models import (
     PermissionRequest,
     ParticipantPermission,
 )
+# The presence rule and the attendance rows both belong to apps.attendance; the
+# class lists only read them, so they stay defined there.
+from apps.attendance import counts as attendance_counts
+from apps.attendance.models import Attendance
 from .serializers import (
     PERMISSION_MODES,
     PERMISSION_TYPES,
@@ -28,7 +33,7 @@ from .serializers import (
     permission_request_payload,
     read_permissions,
 )
-from .livekit import generate_livekit_token
+from .livekit import delete_livekit_room, generate_livekit_token
 
 
 def _session_or_404(session_id):
@@ -121,23 +126,74 @@ class SessionListCreateView(APIView):
     def get(self, request):
         status_filter = request.query_params.get("status")
         course_filter = request.query_params.get("course")
-        
-        qs = Session.objects.filter(is_deleted=False)
+        code_filter = (request.query_params.get("meetingCode") or "").strip()
+
+        # Deleting a class hides it from the live lists; it does not erase what
+        # happened in it. Callers that show history ask for the deleted rows
+        # explicitly, so a removed class still reports who attended it instead
+        # of taking its whole attendance record out of sight with it.
+        include_deleted = request.query_params.get("includeDeleted", "").lower() in (
+            "1", "true", "yes",
+        )
+
+        qs = Session.objects.all() if include_deleted else Session.objects.filter(is_deleted=False)
         if status_filter:
             qs = qs.filter(status=status_filter)
         if course_filter:
             qs = qs.filter(course__icontains=course_filter)
-            
-        sessions = qs.order_by("-created_at")
+
+        # Join by code or invite link. A student is meant to reach a class they
+        # were never enrolled in by typing its code, so this one lookup answers
+        # for exactly the class asked about -- it does not hand back the rest of
+        # the timetable along with it. An unknown code answers with an empty
+        # list, which is what the "no class with that code" state reads.
+        if code_filter:
+            session = qs.filter(meeting_code__iexact=code_filter).first()
+            if session is None:
+                return Response([])
+            # A list, like the unfiltered call: every client reads this endpoint
+            # as a collection and takes the first match, so answering with a
+            # single object here would leave them all with "nothing found".
+            return Response([SessionSerializer(session).data])
+
+        # Scope the list to what the caller is actually part of. Staff see the
+        # institution's timetable; everyone else -- including an account an
+        # admin granted class creation to -- sees only the classes they host,
+        # teach, co-host or have joined. The grant adds the ability to host, not
+        # the right to browse everybody else's classes.
+        if request.user.role not in ("lecturer", "admin"):
+            joined = Attendance.objects.filter(student=request.user).values("session_id")
+            cohosted = CoHost.objects.filter(user=request.user, is_active=True).values("session_id")
+            qs = qs.filter(
+                Q(host=request.user)
+                | Q(lecturer=request.user)
+                | Q(id__in=Subquery(joined))
+                | Q(id__in=Subquery(cohosted))
+            )
+
+        # Counted in the database rather than per row, and counted from the
+        # attendance records themselves: the stored participant_count was only
+        # ever 0, so every "verified" figure built on it read zero.
+        sessions = qs.annotate(**attendance_counts.session_count_annotations()).order_by(
+            "-created_at"
+        )
         serializer = SessionSerializer(sessions, many=True)
         return Response(serializer.data)
 
     def post(self, request):
-        # Hosting a class is a lecturer/admin action. Without this check any
-        # anonymous caller could mint sessions and provision lecturer accounts.
+        # Hosting a class is a lecturer/admin action. The creator becomes the
+        # session's host and lecturer, so without this check any signed-in
+        # student could mint a session and hand themselves host privileges over
+        # it. Anonymous callers are already stopped by IsAuthenticated above.
         if not is_lecturer(request.user):
             return Response(
-                {"error": {"code": "LECTURER_REQUIRED", "message": "Only lecturers or admins can create sessions."}},
+                {
+                    "error": {
+                        "code": "LECTURER_REQUIRED",
+                        "message": "Only hosts can create sessions: lecturers, admins, "
+                        "or accounts an admin has granted class creation to.",
+                    }
+                },
                 status=status.HTTP_403_FORBIDDEN
             )
 
@@ -157,21 +213,29 @@ class SessionListCreateView(APIView):
         # which previously let any caller create staff identities.
         host_user = request.user
 
+        # A new class is *prepared*, not *running*.
+        #
+        # It used to be created active and started, which meant the door was
+        # open before anyone was inside: a student could walk into an empty
+        # room, and the class's clock had already been counting since the host
+        # filled in a form. Creating now only puts the class on the host's
+        # dashboard with its code, ready to share; the host arriving in it is
+        # what starts it (see LiveKitTokenView).
         session = Session.objects.create(
             id=session_id,
             title=title,
             host=host_user,
             lecturer=host_user,
             meeting_code=meeting_code,
-            is_active=True,
-            status="active",
+            is_active=False,
+            status="scheduled",
             is_free=data.get("isFree", True),
             price=data.get("price", 0),
             currency=data.get("currency", "GHS"),
             lecturer_name=data.get("lecturerName", host_user.full_name),
             program=data.get("program", "General"),
             course=data.get("course", "POD101"),
-            started_at=timezone.now(),
+            started_at=None,
             verification_count=data.get("verificationCount", data.get("verification_count", 3)),
             auto_attendance_settings=data.get("autoAttendanceSettings", data.get("auto_attendance_settings", {
                 "enabled": data.get("autoAttendanceEnabled", True),
@@ -186,9 +250,10 @@ class SessionListCreateView(APIView):
 
 class SessionDetailView(APIView):
     """
-    Get or update a specific classroom session.
+    Get, update or remove a specific classroom session.
     GET -> { "document": { "id": "...", "title": "...", ... } }
     PATCH -> { "document": { ... } }
+    DELETE -> { "document": { "deleted": true } }
     """
     permission_classes = [IsAuthenticated]
 
@@ -285,6 +350,38 @@ class SessionDetailView(APIView):
         serializer = SessionSerializer(session)
         return Response(serializer.data)
 
+    def delete(self, request, session_id):
+        """
+        Remove a session from every list.
+
+        This is a soft delete: the row is kept with is_deleted=True so the
+        attendance history and recordings that point at it stay attributable,
+        but every list query (which already filters is_deleted=False) stops
+        returning it. Same rule as ending it -- host, lecturer or admin only;
+        a co-host may run the room but cannot delete the class.
+        """
+        try:
+            session = Session.objects.get(id=session_id, is_deleted=False)
+        except Session.DoesNotExist:
+            return Response(
+                {"error": {"code": "NOT_FOUND", "message": f"Session '{session_id}' not found."}},
+                status=status.HTTP_404_NOT_FOUND
+            )
+
+        if not _is_session_authority(request.user, session):
+            return Response(
+                {"error": {"code": "FORBIDDEN", "message": "Only the session host can delete this session."}},
+                status=status.HTTP_403_FORBIDDEN
+            )
+
+        session.is_deleted = True
+        # The model already documents "deleted" as one of a session's statuses;
+        # using it keeps a removed class distinguishable from a finished one
+        # for anything reading history rather than the live list.
+        session.status = "deleted"
+        session.save()
+        return Response({"deleted": True})
+
 class LiveKitTokenView(APIView):
     """
     Generates a LiveKit JWT token for joining a classroom.
@@ -325,6 +422,73 @@ class LiveKitTokenView(APIView):
                 status=status.HTTP_400_BAD_REQUEST
             )
 
+        # The class's own state decides who may walk in.
+        #
+        # Two rules, one place, because this is the only call that opens a room:
+        #
+        #  * a class the host ended is closed until the host comes back, and
+        #  * a class that has not started yet is closed until the host arrives
+        #    for the first time -- a student who follows the invite link early
+        #    belongs in a waiting room, not in an empty room.
+        #
+        # Both are answered for the host by the host's own token request: it is
+        # the single, un-forgeable signal that they are actually in the class,
+        # and it already happens once per join, so starting costs no extra call.
+        if session_id:
+            session, error = _session_or_404(session_id)
+            if error:
+                return error
+
+            authority = _is_session_authority(request.user, session)
+            ended = session.status == "ended"
+
+            if ended and not authority:
+                # Worded around what the student has to wait for: a class that
+                # has ended is not joinable again until its host opens it, and
+                # "reopens when the host returns" left that implicit.
+                return Response(
+                    {
+                        "error": {
+                            "code": "SESSION_ENDED",
+                            "message": (
+                                "This class has ended and needs its host to start it again. "
+                                "Wait for the host to rejoin, then try again."
+                            ),
+                        }
+                    },
+                    status=status.HTTP_403_FORBIDDEN,
+                )
+
+            if not session.is_active and not authority:
+                return Response(
+                    {
+                        "error": {
+                            "code": "SESSION_NOT_STARTED",
+                            "message": (
+                                "This class has not started yet. It opens as soon as its host "
+                                "joins -- stay here and you will be let in."
+                            ),
+                        }
+                    },
+                    status=status.HTTP_403_FORBIDDEN,
+                )
+
+            if authority:
+                # The host's arrival is what opens the class. Rejoining after an
+                # end reopens it for everybody; joining a prepared class starts
+                # its clock. Either way the *original* start is kept: how long
+                # the class ran is history, and resetting it here would erase the
+                # first sitting from the reported time spent.
+                fields = ["is_active", "status", "ended_at", "host_last_seen"]
+                session.is_active = True
+                session.status = "active"
+                session.ended_at = None
+                session.host_last_seen = timezone.now()
+                if session.started_at is None:
+                    session.started_at = timezone.now()
+                    fields.append("started_at")
+                session.save(update_fields=fields)
+
         token, identity = generate_livekit_token(
             room_name=room_name,
             participant_name=participant_name,
@@ -340,6 +504,115 @@ class LiveKitTokenView(APIView):
             "identity": identity,
             "livekitUrl": SystemSetting.get_setting("livekit_url", getattr(settings, "LIVEKIT_URL", "ws://localhost:7880")),
         })
+
+#: The board a class can hold. The client caps itself at 1200 strokes as well;
+#: these are the server's own limits so a hand-written request cannot park a
+#: megabyte of junk in a JSON column (or make every rejoin parse it).
+WHITEBOARD_MAX_STROKES = 1200
+WHITEBOARD_MAX_POINTS = 20000
+
+
+def _whiteboard_payload(session):
+    board = session.whiteboard or {}
+    return {
+        "open": bool(board.get("open")),
+        "strokes": board.get("strokes") or [],
+        "updatedAt": board.get("updatedAt"),
+    }
+
+
+def _read_whiteboard(data) -> dict:
+    """
+    Validate one board write and return what will be stored.
+
+    Strokes are normalised to the same shape the client draws from (flat pairs
+    of 0..1 coordinates), so a stored board can never make a viewer's canvas
+    throw or draw outside itself.
+    """
+    if not isinstance(data, dict):
+        raise ValueError('The whiteboard must be an object with "open" and "strokes".')
+
+    is_open = data.get("open", False)
+    if not isinstance(is_open, bool):
+        raise ValueError('"open" must be true or false.')
+
+    raw = data.get("strokes") or []
+    if not isinstance(raw, list):
+        raise ValueError('"strokes" must be a list.')
+    if len(raw) > WHITEBOARD_MAX_STROKES:
+        raise ValueError(f"A board holds at most {WHITEBOARD_MAX_STROKES} strokes.")
+
+    strokes = []
+    for index, stroke in enumerate(raw):
+        if not isinstance(stroke, dict):
+            raise ValueError(f"Stroke {index} is not an object.")
+        color = stroke.get("color")
+        width = stroke.get("width")
+        points = stroke.get("points")
+        if not isinstance(color, str) or not color or len(color) > 32:
+            raise ValueError(f"Stroke {index} has an invalid colour.")
+        if isinstance(width, bool) or not isinstance(width, (int, float)):
+            raise ValueError(f"Stroke {index} has an invalid width.")
+        if not 0 < float(width) <= 0.1:
+            raise ValueError(f"Stroke {index} has an invalid width.")
+        if not isinstance(points, list) or len(points) < 2 or len(points) % 2:
+            raise ValueError(f"Stroke {index} needs an even, non-empty list of points.")
+        if len(points) > WHITEBOARD_MAX_POINTS:
+            raise ValueError(f"Stroke {index} has too many points.")
+        coords = []
+        for value in points:
+            if isinstance(value, bool) or not isinstance(value, (int, float)):
+                raise ValueError(f"Stroke {index} has a non-numeric point.")
+            if not -0.001 <= float(value) <= 1.001:
+                raise ValueError(f"Stroke {index} has a point outside the board.")
+            coords.append(float(value))
+        strokes.append({"color": color, "width": float(width), "points": coords})
+
+    return {
+        "open": is_open,
+        "strokes": strokes,
+        "updatedAt": timezone.now().isoformat(),
+    }
+
+
+class SessionWhiteboardView(APIView):
+    """
+    The host's board, kept on the session so it outlives one tab.
+
+    GET -> { "document": { "open", "strokes", "updatedAt" } }
+    PUT -> same shape, replacing the stored board.
+
+    Reading and writing are host-side. Students watch the live board through
+    the room's data channel (a snapshot when they join, a packet per stroke
+    after that), so they never need this endpoint; and a durable copy must rest
+    on the server's idea of who runs the class, because anyone in the room can
+    publish on that channel by hand.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, session_id):
+        session, error = _session_or_404(session_id)
+        if error:
+            return error
+        if not _can_moderate(request.user, session):
+            return _forbidden("Only the host can read this session's whiteboard.")
+        return Response({"document": _whiteboard_payload(session)})
+
+    def put(self, request, session_id):
+        session, error = _session_or_404(session_id)
+        if error:
+            return error
+        if not _can_moderate(request.user, session):
+            return _forbidden("Only the host can save this session's whiteboard.")
+        try:
+            board = _read_whiteboard(request.data)
+        except ValueError as exc:
+            return _bad(str(exc))
+
+        session.whiteboard = board
+        session.save(update_fields=["whiteboard"])
+        return Response({"document": _whiteboard_payload(session)})
+
 
 class EndSessionView(APIView):
     """
@@ -363,11 +636,30 @@ class EndSessionView(APIView):
                 status=status.HTTP_403_FORBIDDEN
             )
 
+        # A recording still writing when the class ends is finalised first:
+        # deleting the room out from under the worker is how a take ends up
+        # truncated. This is the "auto save" path -- the host closing the
+        # class must produce a watchable file, not a half-written one.
+        from apps.storage.lifecycle import finalise_session_recordings
+        finalise_session_recordings(session)
+
         session.is_active = False
         session.status = "ended"
         session.ended_at = timezone.now()
+        # The board belongs to the sitting that just finished; the next one
+        # starts on a blank canvas rather than last week's drawing.
+        session.whiteboard = None
         session.save()
-        
+
+        # Actually clear the room. Marking the session ended only changed our
+        # own record: every participant still held a live WebRTC session, so
+        # the class carried on without its host. Deleting the room disconnects
+        # them all, and (with the join check in LiveKitTokenView) stops them
+        # walking back in until the host reopens the class.
+        delete_livekit_room(session.id)
+        if session.meeting_code and session.meeting_code != session.id:
+            delete_livekit_room(session.meeting_code)
+
         serializer = SessionSerializer(session)
         return Response(serializer.data)
 

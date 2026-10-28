@@ -11,13 +11,16 @@ from .views import (
     SessionPermissionRequestDetailView,
     SessionCoHostsView,
     SessionCoHostDetailView,
+    SessionWhiteboardView,
 )
 # Materials are a storage object (see apps/storage), but they are addressed
 # under the session that owns them, so their views are routed from here and the
 # whole /api/v1/classrooms/ surface stays readable in one file.
 from apps.storage.views import (
+    MyRecordingsView,
     SessionMaterialsView,
     SessionMaterialDetailView,
+    SessionMaterialFileView,
     SessionRecordingsView,
     SessionRecordingDetailView,
     SessionRecordingStopView,
@@ -38,7 +41,12 @@ urlpatterns = [
     path('sessions/<str:session_id>/cohosts/', SessionCoHostsView.as_view(), name='session-cohosts'),
     path('sessions/<str:session_id>/cohosts/<str:user_id>/',
          SessionCoHostDetailView.as_view(), name='session-cohost-detail'),
+    # The host's board, stored so a refresh does not wipe the lecture.
+    path('sessions/<str:session_id>/whiteboard/', SessionWhiteboardView.as_view(),
+         name='session-whiteboard'),
     path('sessions/<str:session_id>/materials/', SessionMaterialsView.as_view(), name='session-materials'),
+    path('sessions/<str:session_id>/materials/<str:material_id>/file/',
+         SessionMaterialFileView.as_view(), name='session-material-file'),
     path('sessions/<str:session_id>/materials/<str:material_id>/',
          SessionMaterialDetailView.as_view(), name='session-material-detail'),
     # Recordings, like materials, are storage objects addressed under their
@@ -52,4 +60,9 @@ urlpatterns = [
     path('sessions/<str:session_id>/recordings/<str:recording_id>/file/',
          SessionRecordingFileView.as_view(), name='session-recording-file'),
     path('token/', LiveKitTokenView.as_view(), name='livekit-token'),
+
+    # The dashboard's Records area: every recording in the classes this user
+    # runs, in one request. Addressed above the sessions it belongs to, which is
+    # why it is declared here rather than under sessions/<id>/recordings/.
+    path('recordings/', MyRecordingsView.as_view(), name='my-recordings'),
 ]

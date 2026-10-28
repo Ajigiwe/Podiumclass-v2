@@ -1,3 +1,5 @@
+import os
+
 import jwt as pyjwt
 from django.conf import settings
 from django.test import TestCase, override_settings
@@ -272,3 +274,91 @@ class DevLoginGateTests(TestCase):
         res = self.client.post(self.url, {}, format="json")
         self.assertEqual(res.status_code, 400)
         self.assertEqual(res.json()["error"]["code"], "CREDENTIAL_REQUIRED")
+
+
+class ProfilePhotoTests(TestCase):
+    """
+    Profile pictures are persisted files, not a transient client-side preview.
+
+    The old UI had a camera button with no handler at all: picking an image did
+    nothing, and any picture that did reach the server was a Google URL that
+    disappeared the moment the person changed their Google photo.
+    """
+
+    def setUp(self):
+        import tempfile
+
+        self.root = tempfile.mkdtemp(prefix="podium-avatars-")
+        self.addCleanup(lambda: __import__("shutil").rmtree(self.root, ignore_errors=True))
+        self.override = override_settings(AVATARS_ROOT=__import__("pathlib").Path(self.root))
+        self.override.enable()
+        self.addCleanup(self.override.disable)
+
+        self.user = User.objects.create(
+            id="usr_avatar_test", email="avatar@podium.test", full_name="Avatar Test"
+        )
+        self.client = APIClient()
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {issue_token(self.user)}")
+        # A one-pixel JPEG: enough for the magic-byte check.
+        self.jpeg = (
+            b"\xff\xd8\xff\xe0\x00\x10JFIF\x00\x01\x01\x00\x00\x01\x00\x01\x00\x00"
+            b"\xff\xdb\x00C\x00\x08\x06\x06\x07\x06\x05\x08\x07\x07\x07\t\t"
+            b"\x08\n\x0c\x14\r\x0c\x0b\x0b\x0c\x19\x12\x13\x0f\x14\x1d\x1a"
+            b"\xff\xc0\x00\x0b\x08\x00\x01\x00\x01\x01\x01\x11\x00\xff\xc4"
+            b"\x00\x14\x00\x01\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00"
+            b"\x00\x00\x00\x00\x08\xff\xda\x00\x08\x01\x01\x00\x00?\x00\x7f\xff\xd9"
+        )
+
+    def _upload(self, content=None, name="me.jpg"):
+        from django.core.files.uploadedfile import SimpleUploadedFile
+
+        return self.client.post(
+            "/api/v1/accounts/me/photo/",
+            {"photo": SimpleUploadedFile(name, content or self.jpeg, content_type="image/jpeg")},
+            format="multipart",
+        )
+
+    def test_upload_persists_and_is_served(self):
+        res = self._upload()
+        self.assertEqual(res.status_code, 200)
+        photo_url = res.json()["document"]["photoUrl"]
+        self.assertIn("/api/v1/accounts/avatar/usr_avatar_test/", photo_url)
+
+        self.user.refresh_from_db()
+        self.assertEqual(self.user.photo_url, photo_url)
+
+        served = self.client.get("/api/v1/accounts/avatar/usr_avatar_test/")
+        self.assertEqual(served.status_code, 200)
+        self.assertEqual(served["Content-Type"], "image/jpeg")
+        self.assertIn("max-age", served["Cache-Control"])
+
+    def test_avatar_is_readable_without_a_token(self):
+        self._upload()
+        anonymous = APIClient()
+        self.assertEqual(
+            anonymous.get("/api/v1/accounts/avatar/usr_avatar_test/").status_code, 200
+        )
+
+    def test_non_image_upload_is_rejected(self):
+        res = self._upload(b"<html>not an image</html>", name="fake.jpg")
+        self.assertEqual(res.status_code, 400)
+        self.assertEqual(res.json()["error"]["code"], "UNSUPPORTED_IMAGE")
+        self.assertEqual(os.listdir(self.root), [])
+
+    def test_replacing_leaves_one_file_and_a_new_url(self):
+        first = self._upload().json()["document"]["photoUrl"]
+        second = self._upload().json()["document"]["photoUrl"]
+        self.assertNotEqual(first, second, "a replacement must bust the cached URL")
+        self.assertEqual(len(os.listdir(self.root)), 1, "the old picture should be removed")
+
+    def test_delete_clears_the_picture(self):
+        self._upload()
+        res = self.client.delete("/api/v1/accounts/me/photo/")
+        self.assertEqual(res.status_code, 200)
+        self.assertIsNone(res.json()["document"].get("photoUrl"))
+        self.assertEqual(os.listdir(self.root), [])
+
+    def test_unknown_account_has_no_avatar(self):
+        self.assertEqual(
+            self.client.get("/api/v1/accounts/avatar/usr_does_not_exist/").status_code, 404
+        )

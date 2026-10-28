@@ -1,0 +1,24 @@
+# Production LiveKit Egress worker config.
+#
+# Rendered from this template into deploy/generated/egress.yaml by
+# deploy/render-config.py. The worker composites the room into an MP4 and
+# writes it to the path Django asks for -- /out/recordings/<file>, which is the
+# same host directory the backend mounts at /data/recordings.
+
+api_key: ${LIVEKIT_API_KEY}
+api_secret: ${LIVEKIT_API_SECRET}
+
+# Internal, plain websocket: the worker lives on the compose network, so it
+# talks to the server directly rather than going out through Caddy's TLS.
+ws_url: ws://livekit:7880
+insecure: true
+
+redis:
+  address: redis:6379
+
+# Where the worker may write. Anything outside this root is refused, which is
+# what keeps a bad filepath from becoming an arbitrary disk write.
+local_output_directory: ${EGRESS_OUTPUT_DIR}
+
+logging:
+  level: info

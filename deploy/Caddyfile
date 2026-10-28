@@ -1,0 +1,47 @@
+# Reverse proxy and TLS for the whole deployment.
+#
+# Caddy is used instead of nginx+certbot because it obtains and renews
+# Let's Encrypt certificates by itself: there is no cron job to forget and no
+# renewal that silently lapses after three months. It also reuses the same ports
+# for the app and the LiveKit signalling host, so only 80/443 need to be public.
+#
+# Domains come from the environment (deploy/.env), never from this file.
+{
+	email {$ACME_EMAIL}
+	# Uncomment while first pointing DNS at a new box if you want to avoid
+	# hitting Let's Encrypt rate limits during setup, then remove it:
+	# acme_ca https://acme-staging-v02.api.letsencrypt.org/directory
+}
+
+# The web app and the API share this hostname. nginx inside the frontend
+# container forwards /api, /admin, /static and /health to Django, which is why
+# the browser never makes a cross-origin request.
+{$APP_DOMAIN} {
+	# Uploads are capped at 100MB by the backend; this is the outer limit.
+	request_body {
+		max_size 120MB
+	}
+
+	reverse_proxy frontend:80 {
+		# Pass the real scheme so Django's SECURE_PROXY_SSL_HEADER sees https.
+		header_up X-Forwarded-Proto https
+	}
+}
+
+# LiveKit signalling only (wss://.../rtc). Media does NOT flow through here:
+# the browser and the server exchange audio/video directly over TCP 7881 and
+# UDP 50000-50100, which must be open on the VPS firewall.
+{$LIVEKIT_DOMAIN} {
+	reverse_proxy livekit:7880 {
+		header_up X-Forwarded-Proto https
+		# Recording start/stop is a long-lived request from Django; give it room.
+		transport http {
+			read_timeout 300s
+			write_timeout 300s
+		}
+	}
+}
+
+# Requests for any other hostname (a bare IP, a scanner using the wrong Host)
+# are answered by Caddy's default 404 on :80; Caddy issues no certificate for
+# a name that is not listed above.

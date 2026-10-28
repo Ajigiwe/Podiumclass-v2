@@ -1,0 +1,83 @@
+{
+  "label": "waitress8",
+  "students": 200,
+  "session_id": "loadtest-200",
+  "join_burst_seconds": 67.88,
+  "hold_seconds": 25.0,
+  "join_phase": [
+    {
+      "endpoint": "GET  /sessions/{id}",
+      "count": 200,
+      "errors": 0,
+      "statuses": {
+        "200": 200
+      },
+      "p50": 3851.2,
+      "p95": 7274.4,
+      "p99": 7712.8,
+      "max": 7815.3,
+      "mean": 3802.9
+    },
+    {
+      "endpoint": "GET  /verification/active",
+      "count": 63,
+      "errors": 1207,
+      "statuses": {
+        "-1": 1207,
+        "200": 55
+      },
+      "p50": 2044.8,
+      "p95": 2056.4,
+      "p99": 2071.5,
+      "max": 60015.9,
+      "mean": 2965.0
+    },
+    {
+      "endpoint": "POST /attendance/join",
+      "count": 98,
+      "errors": 97,
+      "statuses": {
+        "200": 1,
+        "-1": 97
+      },
+      "p50": 60012.4,
+      "p95": 60034.7,
+      "p99": 60062.0,
+      "max": 60066.0,
+      "mean": 59483.6
+    },
+    {
+      "endpoint": "POST /sessions/{id}/token",
+      "count": 200,
+      "errors": 102,
+      "statuses": {
+        "200": 98,
+        "-1": 102
+      },
+      "p50": 60003.2,
+      "p95": 60021.2,
+      "p99": 60061.6,
+      "max": 60080.2,
+      "mean": 34396.0
+    }
+  ],
+  "steady_phase": [
+    {
+      "endpoint": "GET  /verification/active",
+      "count": 1199,
+      "errors": 1207,
+      "statuses": {
+        "-1": 1207,
+        "200": 55
+      },
+      "p50": 2034.5,
+      "p95": 2061.6,
+      "p99": 12918.3,
+      "max": 13958.0,
+      "mean": 2502.3
+    }
+  ],
+  "steady_rps": 0.0,
+  "steady_first_10s_p95": 2052.7,
+  "steady_last_10s_p95": 12472.4
+}

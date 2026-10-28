@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia';
 import { ref, computed } from 'vue';
 import { api } from '../api/client';
+import { identifyUser, resetAnalytics } from '../lib/analytics';
 
 export interface User {
   id: string;
@@ -33,6 +34,9 @@ export const useAuthStore = defineStore('auth', () => {
     try {
       const data = await api.getDocument<User>('/api/v1/accounts/me/');
       user.value = data;
+      // Every page load re-resolves the account: tie it to its PostHog person
+      // here so a refresh (or a second device) continues the same funnel.
+      identifyUser(data);
       return data;
     } catch (err: any) {
       // A 401 means the token is missing/expired — clear it so the router
@@ -52,6 +56,8 @@ export const useAuthStore = defineStore('auth', () => {
     user.value = null;
     token.value = null;
     localStorage.removeItem('podium_token');
+    // Do not carry this person's distinct id into the next sign-in.
+    resetAnalytics();
   }
 
   return {

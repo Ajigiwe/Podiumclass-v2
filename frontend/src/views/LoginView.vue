@@ -45,29 +45,6 @@
           </span>
         </button>
 
-        <!-- Development / LAN Access for Mobile Testing -->
-        <div v-if="showDevLogin" class="pt-4 mt-2 border-t border-white/10 flex flex-col gap-2">
-          <p class="text-[9px] font-bold text-slate-400 uppercase tracking-widest text-center">Dev / Mobile Quick Access</p>
-          <div class="flex gap-2">
-            <button
-              type="button"
-              @click="handleDevLogin('admin')"
-              :disabled="isLoading"
-              class="flex-1 py-2 bg-indigo-600/30 hover:bg-indigo-600/50 border border-indigo-500/30 text-indigo-300 rounded-xl text-xs font-bold transition-all cursor-pointer shadow-sm text-center"
-            >
-              Host (Admin)
-            </button>
-            <button
-              type="button"
-              @click="handleDevLogin('student')"
-              :disabled="isLoading"
-              class="flex-1 py-2 bg-white/5 hover:bg-white/10 border border-white/10 text-slate-300 rounded-xl text-xs font-bold transition-all cursor-pointer shadow-sm text-center"
-            >
-              Student
-            </button>
-          </div>
-        </div>
-
         <!-- Clean Footnote -->
         <div class="card-footer">
           <span>Institutional Access</span>
@@ -80,30 +57,75 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue';
+import { ref, onMounted } from 'vue';
 import { useRouter, useRoute } from 'vue-router';
 import { useAuthStore } from '../stores/auth';
-import { useFeaturesStore } from '../stores/features';
 import { api } from '../api/client';
+import { captureEvent, identifyUser } from '../lib/analytics';
 
 const router = useRouter();
 const route = useRoute();
 const authStore = useAuthStore();
-const features = useFeaturesStore();
 const isLoading = ref(false);
 const errorMessage = ref<string | null>(null);
-const isDev = import.meta.env.DEV;
 
-// The DEV quick-access buttons only work when the backend has DJANGO_DEV_LOGIN
-// switched on, so hide them unless it says it will honour them. The router
-// guard skips the feature fetch on public routes, hence the explicit load.
-const showDevLogin = computed(() => isDev && features.devLogin);
+/**
+ * The OAuth client this build signs in with.
+ *
+ * Read from env so a deployment (or a second environment) can point at its own
+ * client without editing source. The literal is the project's existing client,
+ * so an unconfigured checkout behaves exactly as before.
+ */
+const GOOGLE_CLIENT_ID =
+  (import.meta.env.VITE_GOOGLE_CLIENT_ID as string | undefined)?.trim() ||
+  '148808386481-qp65l50jmuabfte437aafmh85esth944.apps.googleusercontent.com';
 
-onMounted(() => {
-  if (!features.loaded) void features.loadFeatures();
-});
+/**
+ * Origins this OAuth client has registered as "Authorized JavaScript origins".
+ *
+ * Google Identity Services checks the *page's* origin, and answers an
+ * unregistered one with `origin_mismatch` -- rendered inside Google's own
+ * popup, where this app cannot read it. Checking the origin here means the
+ * user gets an explanation in our UI, in place, instead of a dead popup that
+ * looks like the button did nothing.
+ *
+ * Override with VITE_GOOGLE_ALLOWED_ORIGINS when the same client also serves
+ * other hosts (a LAN address for phone testing, a staging domain, ...).
+ */
+const GOOGLE_ALLOWED_ORIGINS = (
+  (import.meta.env.VITE_GOOGLE_ALLOWED_ORIGINS as string | undefined) ||
+  'http://localhost:3000,http://127.0.0.1:3000'
+)
+  .split(',')
+  .map((o) => o.trim().replace(/\/$/, ''))
+  .filter(Boolean);
 
-const GOOGLE_CLIENT_ID = '148808386481-qp65l50jmuabfte437aafmh85esth944.apps.googleusercontent.com';
+/** True when this page's origin is not registered for the OAuth client. */
+function originUnregistered(): string | null {
+  if (typeof window === 'undefined') return null;
+  const origin = window.location.origin.replace(/\/$/, '');
+  return GOOGLE_ALLOWED_ORIGINS.includes(origin) ? null : origin;
+}
+
+/**
+ * Turn a GIS error into something a person can act on.
+ *
+ * `popup_closed` is ambiguous: it is what a user's own cancel looks like, and
+ * it is also how a Google-side block arrives -- Google draws "Access blocked:
+ * origin_mismatch" in the popup and the only way out is closing it. So the
+ * message names that likely cause rather than shrugging.
+ */
+function describeGoogleError(code: string): string {
+  const origin = typeof window !== 'undefined' ? window.location.origin : '';
+  if (code === 'access_denied') return 'Google sign-in was cancelled.';
+  if (code === 'popup_closed') {
+    return `The Google window closed before sign-in finished. If it showed “Access blocked” or origin_mismatch, then ${origin} is not registered for this OAuth client: add it under Google Cloud Console → APIs & Services → Credentials → Authorized JavaScript origins.`;
+  }
+  if (code === 'popup_failed_to_open') {
+    return 'The sign-in window was blocked. Allow pop-ups for this site and try again.';
+  }
+  return `Google sign-in failed (${code || 'unknown error'}). Please try again.`;
+}
 
 function loadGsiClient(): Promise<void> {
   return new Promise((resolve) => {
@@ -125,20 +147,46 @@ function loadGsiClient(): Promise<void> {
   });
 }
 
+// Warm the GSI client while the page is idle so the sign-in click does not have
+// to. Awaiting a script load inside the handler spends the user gesture, and a
+// popup opened after that is blocked -- which read as "sign-in does nothing".
+onMounted(() => {
+  void loadGsiClient();
+});
+
 async function startGoogleLogin() {
-  isLoading.value = true;
   errorMessage.value = null;
 
+  // Refuse before opening anything Google-side when we already know this
+  // origin is not registered: the popup would only show Google's error page.
+  const blockedOrigin = originUnregistered();
+  if (blockedOrigin) {
+    isLoading.value = false;
+    errorMessage.value = `Google sign-in is unavailable from ${blockedOrigin}. This origin is not registered for the OAuth client, so Google would reject it. Add it under Google Cloud Console → APIs & Services → Credentials → Authorized JavaScript origins${GOOGLE_ALLOWED_ORIGINS[0] ? `, or open the app at ${GOOGLE_ALLOWED_ORIGINS[0]}` : ''}.`;
+    return;
+  }
+
+  isLoading.value = true;
+
   try {
-    await loadGsiClient();
+    if (!(window as any).google?.accounts?.oauth2) await loadGsiClient();
 
     const client = (window as any).google.accounts.oauth2.initTokenClient({
       client_id: GOOGLE_CLIENT_ID,
       scope: 'email profile openid',
+      // A popup, not a redirect: the page we are on stays put, so the intended
+      // destination survives the round trip to Google.
+      ux_mode: 'popup',
+      // Popup-level failures (blocked pop-up, closed window) arrive here, not
+      // through the token callback.
+      error_callback: (err: any) => {
+        isLoading.value = false;
+        errorMessage.value = describeGoogleError(err?.type || 'unknown');
+      },
       callback: async (tokenResponse: any) => {
         if (tokenResponse.error) {
           isLoading.value = false;
-          errorMessage.value = 'Google sign-in was cancelled or encountered an error.';
+          errorMessage.value = describeGoogleError(tokenResponse.error);
           return;
         }
 
@@ -150,6 +198,14 @@ async function startGoogleLogin() {
           authStore.user = data.user;
           authStore.token = data.token;
           localStorage.setItem('podium_token', data.token);
+          // The first step of the journey we care about: who signed in, with
+          // which role, and whether onboarding still owes an index number.
+          identifyUser(data.user);
+          captureEvent('user_signed_in', {
+            method: 'google',
+            role: data.user?.role || 'student',
+            needs_profile_setup: needsProfileSetup(data.user),
+          });
           const redirect = (route.query.redirect as string) || (needsProfileSetup(data.user) ? '/profile?setup=1' : '/');
           router.push(redirect);
         } catch (err: any) {
@@ -160,34 +216,14 @@ async function startGoogleLogin() {
       },
     });
 
-    // Explicit user trigger - opens popup only on click, NEVER on page load
+    // Explicit user trigger - opens the popup only on click, never on load.
+    // This runs in the same task as the click whenever the client is warm.
     client.requestAccessToken({ prompt: 'select_account' });
   } catch (err: any) {
     isLoading.value = false;
     errorMessage.value = 'Failed to initialize Google Authentication client.';
   }
 }
-
-async function handleDevLogin(role: 'admin' | 'student') {
-  isLoading.value = true;
-  errorMessage.value = null;
-  try {
-    const data = await api.postDocument<{ user: any; token: string }>('/api/v1/accounts/google/', {
-      dev_login: true,
-      role,
-    });
-    authStore.user = data.user;
-    authStore.token = data.token;
-    localStorage.setItem('podium_token', data.token);
-    const redirect = (route.query.redirect as string) || (needsProfileSetup(data.user) ? '/profile?setup=1' : '/');
-    router.push(redirect);
-  } catch (err: any) {
-    errorMessage.value = err?.message || 'Quick login failed.';
-  } finally {
-    isLoading.value = false;
-  }
-}
-
 function needsProfileSetup(user: any): boolean {
   return user?.role === 'student' && !user?.indexNumber;
 }
@@ -297,15 +333,19 @@ function needsProfileSetup(user: any): boolean {
   border: 1px solid rgba(239, 68, 68, 0.3);
   padding: 0.65rem 0.85rem;
   display: flex;
-  align-items: center;
+  /* Top-aligned, because a registration message runs to several lines and a
+     centred icon would float in the middle of it. */
+  align-items: flex-start;
   gap: 0.5rem;
   font-size: 0.75rem;
+  line-height: 1.45;
   color: #FCA5A5;
   text-align: left;
 }
 
 .error-icon {
   flex-shrink: 0;
+  margin-top: 1px;
 }
 
 /* Clean Full-Width Native Google Button */

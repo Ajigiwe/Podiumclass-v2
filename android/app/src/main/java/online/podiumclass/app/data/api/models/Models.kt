@@ -1,5 +1,6 @@
 package online.podiumclass.app.data.api.models
 
+import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 
 @Serializable
@@ -28,7 +29,26 @@ data class UserDto(
     val photoUrl: String? = null,
     val indexNumber: String? = null,
     val walletBalance: Long = 0,
-    val university: String? = null
+    val university: String? = null,
+    val bio: String? = null,
+    val phone: String? = null,
+    val year: String? = null,
+    // Admin-granted, not self-service: lets an account host without being a
+    // lecturer. The server decides; the app only reflects it.
+    val canCreateClasses: Boolean = false,
+    val status: String = "active",
+    val isVerified: Boolean = false,
+    val createdAt: String? = null
+)
+
+@Serializable
+data class UpdateProfileRequest(
+    val fullName: String? = null,
+    val indexNumber: String? = null,
+    val university: String? = null,
+    val bio: String? = null,
+    val phone: String? = null,
+    val year: String? = null
 )
 
 @Serializable
@@ -122,8 +142,18 @@ data class RecordingDto(
     val error: String? = null,
     val startedAt: String? = null,
     val endedAt: String? = null,
-    val durationSeconds: Int? = null,
+    // Long, not Int: a duration reported in the wrong unit can exceed a
+    // 32-bit int, and one oversized field must not fail the whole shelf.
+    val durationSeconds: Long? = null,
     val sizeBytes: Long? = null,
+    // Signed URLs. A player and the system downloader fetch a URL with no
+    // headers of their own, so the credential rides in the query string; the
+    // watch link is minted for anyone who may see the shelf and the download
+    // link only for the people who run the class.
+    val playUrl: String? = null,
+    val downloadUrl: String? = null,
+    val canDownload: Boolean = false,
+    val fileName: String? = null,
     val fileUrl: String? = null
 )
 
@@ -133,6 +163,11 @@ data class SessionDto(
     val title: String,
     val meetingCode: String? = null,
     val status: String = "active",
+    // When the class was created and when it actually ran. The dashboard uses
+    // them for the register list; the length booked is not the length it ran.
+    val createdAt: String? = null,
+    val startedAt: String? = null,
+    val endedAt: String? = null,
     val is_active: Boolean = true,
     val is_free: Boolean = true,
     val price: Long = 0,
@@ -142,7 +177,15 @@ data class SessionDto(
     val course: String? = null,
     val scheduledStartTime: String? = null,
     val durationMinutes: Int? = null,
+    // How long the class really ran, from its start to its end, as opposed to
+    // the length it was booked for. Null until it has started.
+    val actualDurationMinutes: Int? = null,
     val participantCount: Int = 0,
+    // Real attendance for the class, counted from the attendance records.
+    // "participantCount" was never written by the server, so anything built on
+    // it (every "verified" figure) read zero.
+    val attendeeCount: Int = 0,
+    val presentCount: Int = 0,
     val hostId: String? = null,
     val verificationCount: Int? = 3,
     val autoAttendanceSettings: AutoAttendanceSettingsDto? = null,
@@ -157,6 +200,9 @@ data class CreateSessionRequest(
     val title: String,
     val course: String? = null,
     val program: String? = null,
+    // How the host appears on the class and in attendance records. Left out of
+    // the request (the default), the server uses the account's own name.
+    val lecturerName: String? = null,
     val is_free: Boolean = true,
     val price: Long = 0,
     val durationMinutes: Int = 60,
@@ -229,16 +275,69 @@ data class AttendanceSummaryDto(
 data class AttendanceRecordDto(
     val studentId: String,
     val studentName: String,
+    val indexNumber: String = "",
     val joined: Boolean = false,
     val present: Boolean = false,
+    val joinedAt: String? = null,
+    val leftAt: String? = null,
+    // Minutes this student was actually in the room, bounded by the class.
+    val stayMinutes: Int? = null,
     val verificationsSent: Int = 0,
     val verificationsCompleted: Int = 0,
     val verificationPercentage: Double = 0.0
 )
 
 @Serializable
+// One student's own attendance in one class, from /attendance/mine/.
+data class StudentAttendanceRecordDto(
+    val id: String,
+    val sessionId: String,
+    val title: String = "Class",
+    val course: String? = null,
+    val lecturerName: String? = null,
+    val status: String = "ended",
+    val isDeleted: Boolean = false,
+    val startedAt: String? = null,
+    val endedAt: String? = null,
+    val createdAt: String? = null,
+    val actualDurationMinutes: Int? = null,
+    val joinedAt: String? = null,
+    val leftAt: String? = null,
+    val stayMinutes: Int? = null,
+    val present: Boolean = false,
+    val verificationPercentage: Int = 0,
+    val verificationsSent: Int = 0,
+    val verificationsCompleted: Int = 0
+)
+
+@Serializable
+// The class block inside a register, from /attendance/sessions/<id>/.
+//
+// Deliberately not a SessionDto. That serializer names the id "sessionId"
+// rather than "id", so decoding it as a SessionDto failed on every register
+// with a missing-field error and the app showed that error where the roster
+// should have been.
+data class AttendanceSessionDto(
+    val sessionId: String = "",
+    val title: String = "Class",
+    val course: String? = null,
+    val program: String? = null,
+    val lecturerId: String? = null,
+    val lecturerName: String? = null,
+    val status: String = "ended",
+    val isActive: Boolean = false,
+    val createdAt: String? = null,
+    val startedAt: String? = null,
+    val endedAt: String? = null,
+    val durationMinutes: Int? = null,
+    val participantCount: Int = 0,
+    val attendeeCount: Int = 0,
+    val presentCount: Int = 0
+)
+
+@Serializable
 data class AttendanceRosterDto(
-    val session: SessionDto? = null,
+    val session: AttendanceSessionDto? = null,
     val summary: AttendanceSummaryDto = AttendanceSummaryDto(),
     val records: List<AttendanceRecordDto> = emptyList()
 )
@@ -251,6 +350,65 @@ data class ChatMessageDto(
     val role: String = "student",
     val time: String? = null
 )
+
+@Serializable
+data class AdminUserPatchRequest(
+    val role: String? = null,
+    val canCreateClasses: Boolean? = null,
+    val status: String? = null,
+    val isVerified: Boolean? = null
+)
+
+@Serializable
+data class FeatureDto(
+    val key: String,
+    val label: String = "",
+    val description: String = "",
+    val group: String = "",
+    val critical: Boolean = false,
+    @SerialName("default") val defaultEnabled: Boolean = false,
+    val enabled: Boolean = false
+)
+
+@Serializable
+data class FeatureGroupDto(
+    val key: String,
+    val label: String = "",
+    val description: String = ""
+)
+
+@Serializable
+data class SettingDto(
+    val key: String,
+    val group: String = "",
+    val label: String = "",
+    val type: String = "text",
+    val help: String = "",
+    val secret: Boolean = false,
+    val value: String? = null,
+    val isSet: Boolean = false
+)
+
+@Serializable
+data class SettingGroupDto(
+    val key: String,
+    val label: String = "",
+    val description: String = ""
+)
+
+@Serializable
+data class AdminSettingsDto(
+    val groups: List<SettingGroupDto> = emptyList(),
+    val settings: List<SettingDto> = emptyList(),
+    val featureGroups: List<FeatureGroupDto> = emptyList(),
+    val features: List<FeatureDto> = emptyList()
+)
+
+@Serializable
+data class FeatureToggleRequest(val enabled: Boolean)
+
+@Serializable
+data class SettingUpdateRequest(val value: String)
 
 @Serializable
 data class DataPacket(
@@ -276,4 +434,27 @@ data class DataPacket(
     val requestType: String? = null,
     val target: String? = null,
     val granted: Boolean? = null
+)
+
+/**
+ * One resource shared in a class: an uploaded file the server streams back, or
+ * a link the host pasted. The two are the same row to the UI.
+ */
+@Serializable
+data class MaterialDto(
+    val id: String,
+    val title: String = "",
+    val url: String = "",
+    val type: String = "link",
+    val size: String = "",
+    val icon: String = "",
+    val sharedBy: String? = null,
+    val sharedAt: String? = null
+)
+
+@Serializable
+data class ShareLinkRequest(
+    val title: String,
+    val url: String,
+    val type: String = "link"
 )

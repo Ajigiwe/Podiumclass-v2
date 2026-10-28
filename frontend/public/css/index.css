@@ -10,8 +10,17 @@
     100% { background-color: #F5F6FA; }
 }
 
+/*
+ * Entry animation for a page.
+ *
+ * Deliberately no `forwards`: the last keyframe already matches the element's
+ * resting state, but holding it leaves `transform: translateY(0)` applied -- and
+ * any transform makes the element the containing block for `position: fixed`
+ * descendants. That is what pinned dialogs ("Create a new class") to the bottom
+ * of the page instead of the middle of the screen.
+ */
 .animate-fade-in {
-    animation: fadeIn 0.4s cubic-bezier(0.4, 0, 0.2, 1) forwards;
+    animation: fadeIn 0.4s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 .skeleton {

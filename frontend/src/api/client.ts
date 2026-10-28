@@ -110,6 +110,35 @@ export const api = {
   },
 
   /**
+   * Post a multipart upload unwrapped from { document: T }.
+   *
+   * FormData must not inherit the client's global JSON content type -- axios
+   * then sets the correct multipart boundary itself. Uploads get a much longer
+   * timeout than API calls: a hundred megabytes over classroom wifi is slow.
+   */
+  async postUploadDocument<T>(url: string, formData: FormData, timeoutMs = 300000): Promise<T> {
+    const res = await apiClient.post<DocumentResponse<T>>(url, formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+      timeout: timeoutMs,
+    });
+    if (res.data && 'document' in res.data) {
+      return res.data.document;
+    }
+    return res.data as unknown as T;
+  },
+
+  /**
+   * Put mutation unwrapped from { document: T }
+   */
+  async putDocument<T>(url: string, data?: any): Promise<T> {
+    const res = await apiClient.put<DocumentResponse<T>>(url, data);
+    if (res.data && 'document' in res.data) {
+      return res.data.document;
+    }
+    return res.data as unknown as T;
+  },
+
+  /**
    * Patch mutation unwrapped from { document: T }
    */
   async patchDocument<T>(url: string, data?: any): Promise<T> {

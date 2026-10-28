@@ -86,13 +86,75 @@
               <i :class="['fas', record.status === 'active' ? 'fa-video' : 'fa-clock', 'text-[9px]']"></i>
               {{ record.status || 'scheduled' }}
             </span>
-            <router-link
-              :to="`/classroom/${record.id}`"
-              class="px-3.5 py-1.5 bg-[#F5F6FA] dark:bg-slate-800 text-[#0D0D1A] dark:text-slate-200 text-xs font-semibold rounded-lg hover:bg-[#E8EEFF] hover:text-[#1845D4] transition-colors"
+            <!-- Review opens the record, not the room. A finished class is
+                 history: re-entering it is not a thing, and for a student the
+                 only useful action is reading what happened. -->
+            <button
+              @click="openRecord(record)"
+              class="px-3.5 py-1.5 bg-[#F5F6FA] dark:bg-slate-800 text-[#0D0D1A] dark:text-slate-200 text-xs font-semibold rounded-lg hover:bg-[#E8EEFF] hover:text-[#1845D4] transition-colors cursor-pointer"
             >
               Review
-            </router-link>
+            </button>
           </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Class details. Data only: no join button, by design. -->
+    <div
+      v-if="detailRecord"
+      class="fixed inset-0 z-[700] flex items-center justify-center p-4 animate-fade-in"
+      @click.self="detailRecord = null"
+    >
+      <div class="absolute inset-0 bg-slate-900/40 backdrop-blur-sm" />
+      <div class="relative w-full max-w-lg bg-white dark:bg-slate-900 border border-[#DDE0F0] dark:border-slate-800 rounded-2xl shadow-2xl overflow-hidden">
+        <div class="px-6 py-5 border-b border-[#DDE0F0] dark:border-slate-800 flex items-start justify-between gap-4">
+          <div class="min-w-0">
+            <p class="text-[10px] font-black uppercase tracking-[0.2em] text-[#1845D4]">{{ detailRecord.course || 'Class' }}</p>
+            <h2 class="text-lg font-bold text-[#0D0D1A] dark:text-white leading-tight mt-1 truncate">{{ detailRecord.title }}</h2>
+            <p class="text-[11px] text-[#8888A8] mt-1">Hosted by {{ detailRecord.lecturerName || 'the host' }}</p>
+          </div>
+          <button
+            @click="detailRecord = null"
+            class="p-2 text-slate-500 hover:text-slate-900 dark:hover:text-white bg-slate-100 dark:bg-slate-800 rounded-xl cursor-pointer"
+            aria-label="Close"
+          >
+            <i class="fas fa-times"></i>
+          </button>
+        </div>
+
+        <div class="p-6 space-y-4">
+          <div class="grid grid-cols-2 gap-3">
+            <div class="rounded-xl bg-[#F5F6FA] dark:bg-slate-800/60 p-3.5">
+              <p class="text-[9px] font-black uppercase tracking-[0.15em] text-[#8888A8]">Date</p>
+              <p class="text-[13px] font-bold text-[#0D0D1A] dark:text-white mt-1">
+                {{ formatDate(detailRecord.startedAt || detailRecord.createdAt) }}
+              </p>
+            </div>
+            <div class="rounded-xl bg-[#F5F6FA] dark:bg-slate-800/60 p-3.5">
+              <p class="text-[9px] font-black uppercase tracking-[0.15em] text-[#8888A8]">Started</p>
+              <p class="text-[13px] font-bold text-[#0D0D1A] dark:text-white mt-1">{{ formatClock(detailRecord.startedAt) }}</p>
+            </div>
+            <div class="rounded-xl bg-[#F5F6FA] dark:bg-slate-800/60 p-3.5">
+              <p class="text-[9px] font-black uppercase tracking-[0.15em] text-[#8888A8]">Ended</p>
+              <p class="text-[13px] font-bold text-[#0D0D1A] dark:text-white mt-1">{{ formatClock(detailRecord.endedAt) }}</p>
+            </div>
+            <div class="rounded-xl bg-[#F5F6FA] dark:bg-slate-800/60 p-3.5">
+              <p class="text-[9px] font-black uppercase tracking-[0.15em] text-[#8888A8]">Class ran</p>
+              <p class="text-[13px] font-bold text-[#0D0D1A] dark:text-white mt-1">
+                {{ formatDuration(detailRecord.actualDurationMinutes ?? detailRecord.durationMinutes) }}
+              </p>
+            </div>
+          </div>
+
+          <div class="flex items-center justify-between rounded-xl border border-[#DDE0F0] dark:border-slate-800 px-4 py-3">
+            <span class="text-[11px] text-[#8888A8]">Class code</span>
+            <span class="font-mono text-[12px] font-bold text-[#0D0D1A] dark:text-white">{{ detailRecord.meetingCode || '—' }}</span>
+          </div>
+
+          <p class="text-[11px] text-[#8888A8] leading-relaxed">
+            This class has ended. Its record stays here for reference; it cannot be re-entered.
+          </p>
         </div>
       </div>
     </div>
@@ -108,6 +170,18 @@ const authStore = useAuthStore();
 const activeTab = ref<'joined' | 'hosted'>('joined');
 const records = ref<any[]>([]);
 const isLoading = ref(false);
+const detailRecord = ref<any | null>(null);
+
+function openRecord(record: any) {
+  detailRecord.value = record;
+}
+
+function formatClock(value?: string) {
+  if (!value) return '—';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '—';
+  return date.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+}
 
 const displayList = computed(() => {
   if (activeTab.value === 'hosted') {
@@ -132,7 +206,11 @@ function formatDate(dateStr?: string) {
 }
 
 function formatDuration(minutes?: number) {
-  return minutes ? `${minutes} mins` : '—';
+  if (minutes === null || minutes === undefined) return '—';
+  if (minutes < 60) return `${minutes} mins`;
+  const hours = Math.floor(minutes / 60);
+  const rest = minutes % 60;
+  return rest ? `${hours}h ${String(rest).padStart(2, '0')}m` : `${hours}h`;
 }
 
 async function loadHistory() {

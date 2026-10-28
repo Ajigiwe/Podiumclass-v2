@@ -187,7 +187,115 @@
       </div>
     </div>
 
-    <!-- ============ TAB 3: SETTINGS ============ -->
+    <!-- ============ TAB 3: USERS ============ -->
+    <div v-if="currentTab === 'users'" class="space-y-6">
+      <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+        <div>
+          <h2 class="text-lg font-bold text-[#0D0D1A] dark:text-white">People</h2>
+          <p class="text-xs text-[#8888A8] mt-0.5">
+            {{ users.length }} account{{ users.length === 1 ? '' : 's' }} shown. Role changes and class-creation grants apply on the account's next request.
+          </p>
+        </div>
+        <div class="flex flex-wrap gap-2">
+          <input
+            v-model="userQuery"
+            @input="onSearchUsers"
+            type="search"
+            placeholder="Search name, email or index number"
+            class="px-3 py-2 bg-white dark:bg-slate-900 border border-[#DDE0F0] dark:border-slate-800 rounded-lg text-xs outline-none focus:border-[#1845D4] w-64"
+          />
+          <select
+            v-model="userRoleFilter"
+            @change="loadUsers"
+            class="px-3 py-2 bg-white dark:bg-slate-900 border border-[#DDE0F0] dark:border-slate-800 rounded-lg text-xs font-semibold outline-none focus:border-[#1845D4] cursor-pointer"
+          >
+            <option value="">All roles</option>
+            <option value="student">Students</option>
+            <option value="lecturer">Lecturers</option>
+            <option value="admin">Admins</option>
+          </select>
+        </div>
+      </div>
+
+      <div v-if="usersLoading" class="py-16 text-center text-xs text-[#8888A8] font-semibold">
+        <i class="fas fa-circle-notch fa-spin mr-2"></i> Loading accounts…
+      </div>
+      <div v-else-if="usersError" class="p-5 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-900/40 rounded-2xl text-xs font-semibold text-red-600 dark:text-red-400">
+        <i class="fas fa-triangle-exclamation mr-2"></i>{{ usersError }}
+      </div>
+      <div v-else-if="users.length === 0" class="py-16 text-center text-xs text-[#8888A8]">
+        No account matches that search.
+      </div>
+
+      <div v-else class="space-y-2">
+        <div
+          v-for="user in users"
+          :key="user.id"
+          class="p-4 bg-white dark:bg-slate-900 border border-[#DDE0F0] dark:border-slate-800 rounded-2xl"
+        >
+          <div class="flex flex-col lg:flex-row lg:items-center gap-4">
+            <div class="flex items-center gap-3 min-w-0 lg:w-64 shrink-0">
+              <div
+                class="w-9 h-9 rounded-xl flex items-center justify-center text-xs font-black shrink-0"
+                :class="user.role === 'admin'
+                  ? 'bg-red-500/10 text-red-500'
+                  : user.role === 'lecturer'
+                    ? 'bg-[#1845D4]/10 text-[#1845D4]'
+                    : 'bg-[#F5F6FA] dark:bg-slate-800 text-[#8888A8]'"
+              >
+                {{ (user.fullName || user.email).slice(0, 1).toUpperCase() }}
+              </div>
+              <div class="min-w-0">
+                <p class="text-[13px] font-bold text-[#0D0D1A] dark:text-white truncate">{{ user.fullName || 'Unnamed account' }}</p>
+                <p class="text-[11px] text-[#8888A8] truncate">{{ user.email }}</p>
+              </div>
+            </div>
+
+            <div class="flex flex-wrap items-center gap-3 flex-1">
+              <select
+                :value="user.role"
+                :disabled="busyUserId === user.id"
+                @change="updateUser(user, { role: ($event.target as HTMLSelectElement).value })"
+                class="px-2.5 py-1.5 bg-[#F5F6FA] dark:bg-slate-800 border border-[#DDE0F0] dark:border-slate-700 rounded-lg text-[11px] font-bold outline-none cursor-pointer disabled:opacity-50"
+              >
+                <option value="student">Student</option>
+                <option value="lecturer">Lecturer</option>
+                <option value="admin">Admin</option>
+              </select>
+
+              <label class="flex items-center gap-2 text-[11px] font-semibold text-[#8888A8] cursor-pointer">
+                <input
+                  type="checkbox"
+                  :checked="user.canCreateClasses"
+                  :disabled="busyUserId === user.id"
+                  @change="updateUser(user, { canCreateClasses: ($event.target as HTMLInputElement).checked })"
+                  class="accent-[#1845D4] cursor-pointer"
+                />
+                Can create classes
+              </label>
+
+              <label class="flex items-center gap-2 text-[11px] font-semibold cursor-pointer" :class="user.status === 'disabled' ? 'text-red-500' : 'text-[#8888A8]'">
+                <input
+                  type="checkbox"
+                  :checked="user.status === 'disabled'"
+                  :disabled="busyUserId === user.id"
+                  @change="updateUser(user, { status: ($event.target as HTMLInputElement).checked ? 'disabled' : 'active' })"
+                  class="accent-red-500 cursor-pointer"
+                />
+                Disabled
+              </label>
+
+              <span v-if="user.indexNumber" class="px-2 py-0.5 rounded bg-[#F5F6FA] dark:bg-slate-800 text-[10px] font-mono text-[#8888A8]">
+                {{ user.indexNumber }}
+              </span>
+              <i v-if="busyUserId === user.id" class="fas fa-circle-notch fa-spin text-[#1845D4] text-xs"></i>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ============ TAB 4: SETTINGS ============ -->
     <div v-if="currentTab === 'settings'" class="space-y-6">
       <div>
         <h2 class="text-xl font-bold text-[#0D0D1A] dark:text-white">Platform Settings</h2>
@@ -205,11 +313,13 @@
 import { ref, computed, onMounted } from 'vue';
 import { api } from '../api/client';
 import SettingsPanel from '../components/SettingsPanel.vue';
+import { toast, errorText } from '../stores/toast';
 
 const currentTab = ref('dashboard');
 
 const tabs = [
   { id: 'dashboard', label: 'Dashboard', icon: 'fas fa-tachometer-alt' },
+  { id: 'users', label: 'Users', icon: 'fas fa-users-gear' },
   { id: 'sessions', label: 'Sessions', icon: 'fas fa-broadcast-tower' },
   { id: 'settings', label: 'Settings', icon: 'fas fa-cog' },
 ];
@@ -228,6 +338,59 @@ const revenueGhs = computed(() => {
     .reduce((sum, t) => sum + (Number(t.amount) || 0), 0);
   return (pesewas / 100).toFixed(2);
 });
+
+// ---- People ---------------------------------------------------------------
+// Same contract the mobile control panel uses: a scoped list, and partial
+// updates that the server validates (it refuses self-demotion and cannot lose
+// the configured superadmin).
+const users = ref<any[]>([]);
+const usersLoading = ref(false);
+const usersError = ref<string | null>(null);
+const userQuery = ref('');
+const userRoleFilter = ref('');
+const busyUserId = ref<string | null>(null);
+let searchTimer: ReturnType<typeof setTimeout> | null = null;
+
+async function loadUsers() {
+  usersLoading.value = true;
+  usersError.value = null;
+  try {
+    const params = new URLSearchParams();
+    if (userQuery.value.trim()) params.set('q', userQuery.value.trim());
+    if (userRoleFilter.value) params.set('role', userRoleFilter.value);
+    const suffix = params.toString() ? `?${params.toString()}` : '';
+    const res = await api.getDocuments<any>(`/api/v1/accounts/users/${suffix}`);
+    users.value = res.documents || [];
+  } catch (err: any) {
+    usersError.value = err?.message || 'Could not load accounts.';
+    users.value = [];
+  } finally {
+    usersLoading.value = false;
+  }
+}
+
+/** Typing is debounced: the search runs server-side, not per keystroke. */
+function onSearchUsers() {
+  if (searchTimer) clearTimeout(searchTimer);
+  searchTimer = setTimeout(loadUsers, 320);
+}
+
+async function updateUser(user: any, patch: Record<string, unknown>) {
+  busyUserId.value = user.id;
+  try {
+    const updated = await api.patchDocument<any>(`/api/v1/accounts/users/${user.id}/`, patch) as unknown as any;
+    const index = users.value.findIndex((u) => u.id === user.id);
+    if (index !== -1) users.value[index] = updated;
+  } catch (err: any) {
+    // The server refused (self-demotion, protected superadmin, a role typo).
+    // Say so and reload the row's true state rather than leaving the control
+    // showing a change that did not happen.
+    toast.error('Change refused', errorText(err, 'The server did not accept that change.'));
+    await loadUsers();
+  } finally {
+    busyUserId.value = null;
+  }
+}
 
 async function loadAdminData() {
   try {
@@ -255,5 +418,6 @@ async function loadAdminData() {
 
 onMounted(() => {
   loadAdminData();
+  loadUsers();
 });
 </script>

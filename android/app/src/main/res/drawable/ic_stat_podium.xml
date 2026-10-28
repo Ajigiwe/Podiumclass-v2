@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Notification small icon. Android draws this as a silhouette (alpha only) and
+  tints it, so it is the same white cap as the launcher, kept slightly inside
+  the 24dp box so the system adds its own padding without clipping the board.
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+
+    <!-- Centred on (12, 12): the glyph's own centre is (11.5, 12). -->
+    <group
+        android:translateX="1.65"
+        android:translateY="1.2"
+        android:scaleX="0.9"
+        android:scaleY="0.9">
+
+        <path
+            android:fillColor="#FFFFFF"
+            android:pathData="M5,13.18v4L12,21l7,-3.82v-4L12,17l-7,-3.82z" />
+
+        <path
+            android:fillColor="#FFFFFF"
+            android:pathData="M12,3L1,9l11,6 9,-4.91V17h2V9L12,3z" />
+    </group>
+</vector>

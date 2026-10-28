@@ -1,4 +1,8 @@
+from django.utils import timezone
 from rest_framework import serializers
+# The presence and attendance-count rules belong to the attendance records;
+# the class list only reads them.
+from apps.attendance import counts as attendance_counts
 from .models import Session, Participant, ChatMessage, PermissionRequest, ParticipantPermission
 
 # Media a host can require approval for, and the two states it can be in.
@@ -27,6 +31,12 @@ def read_permissions(session: Session) -> dict:
 
 class SessionSerializer(serializers.ModelSerializer):
     participantCount = serializers.IntegerField(source="participant_count", read_only=True)
+    # Real attendance for this class. "participantCount" alone was not enough:
+    # every client that wanted to show attendance read that one field, and it
+    # was only ever written at 0.
+    attendeeCount = serializers.SerializerMethodField()
+    presentCount = serializers.SerializerMethodField()
+
     meetingCode = serializers.CharField(source="meeting_code", required=False)
     lecturerName = serializers.CharField(source="lecturer_name", required=False, allow_blank=True)
     scheduledStartTime = serializers.DateTimeField(source="scheduled_start_time", required=False, allow_null=True)
@@ -45,6 +55,9 @@ class SessionSerializer(serializers.ModelSerializer):
     isMutedAll = serializers.BooleanField(source="is_muted_all", read_only=True)
     autoApproveMic = serializers.BooleanField(source="auto_approve_mic", read_only=True)
     permissions = serializers.SerializerMethodField()
+    # How long the class actually ran, as opposed to how long it was booked
+    # for. See get_actualDurationMinutes.
+    actualDurationMinutes = serializers.SerializerMethodField()
 
     class Meta:
         model = Session
@@ -55,10 +68,32 @@ class SessionSerializer(serializers.ModelSerializer):
             'createdAt', 'startedAt', 'endedAt', 'hostId',
             'verificationCount', 'autoAttendanceSettings',
             'isMutedAll', 'autoApproveMic', 'permissions',
+            'actualDurationMinutes', 'attendeeCount', 'presentCount',
         ]
+
+    def get_attendeeCount(self, session) -> int:
+        return attendance_counts.count_attendees(session)
+
+    def get_presentCount(self, session) -> int:
+        return attendance_counts.count_present(session)
 
     def get_permissions(self, session) -> dict:
         return read_permissions(session)
+
+    def get_actualDurationMinutes(self, session):
+        """
+        Minutes the class actually ran, measured from its real start and end.
+
+        ``durationMinutes`` is the length a host *books* when creating a class,
+        so it says nothing about time attended -- a five-minute test class still
+        carried the 60-minute default, and every client then reported an hour.
+        A still-running class counts up to now; one that never started reports
+        nothing rather than inventing a figure.
+        """
+        if not session.started_at:
+            return None
+        end = session.ended_at or timezone.now()
+        return max(0, int((end - session.started_at).total_seconds() // 60))
 
 class ParticipantSerializer(serializers.ModelSerializer):
     userName = serializers.CharField(source="user_name")

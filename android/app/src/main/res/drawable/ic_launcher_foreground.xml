@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Launcher foreground: the web's graduation cap, centred on the 108-unit
+  adaptive grid and kept inside the 66dp safe circle, so no launcher mask
+  clips it. The blue comes from ic_launcher_background.
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <!-- The glyph's own box is x 1..22, y 3..21, so its centre is (11.5, 12),
+         not (12, 12). These offsets put that centre on (54, 54). -->
+    <group
+        android:translateX="24.1"
+        android:translateY="22.8"
+        android:scaleX="2.6"
+        android:scaleY="2.6">
+
+        <!-- Band -->
+        <path
+            android:fillColor="#FFFFFF"
+            android:pathData="M5,13.18v4L12,21l7,-3.82v-4L12,17l-7,-3.82z" />
+
+        <!-- Board -->
+        <path
+            android:fillColor="#FFFFFF"
+            android:pathData="M12,3L1,9l11,6 9,-4.91V17h2V9L12,3z" />
+    </group>
+</vector>

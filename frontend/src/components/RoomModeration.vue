@@ -44,19 +44,19 @@ function review(requestId: string, approve: boolean) {
 </script>
 
 <template>
-  <div class="p-3 border-b border-white/[0.08] bg-white/[0.02] flex flex-col gap-2.5 shrink-0">
+  <div class="p-3 border-b border-slate-200 bg-slate-50/70 flex flex-col gap-2.5 shrink-0">
     <div class="flex items-center justify-between gap-2">
       <button
         @click="onToggleMuteAll"
-        class="px-3 py-1.5 text-[10px] font-bold uppercase tracking-wider bg-white/5 hover:bg-white/10 rounded-lg text-white border border-white/5 transition-all flex items-center gap-1.5 cursor-pointer"
+        class="px-3 py-1.5 text-[10px] font-bold uppercase tracking-wider bg-white hover:bg-slate-100 rounded-lg text-slate-800 border border-slate-200 transition-all flex items-center gap-1.5 cursor-pointer"
         :title="isMutedAll ? 'Release everyone' : 'Mute everyone and lock their microphones'"
       >
-        <i class="fas fa-volume-mute text-xs text-red-400"></i>
+        <i :class="['fas fa-volume-mute text-xs', isMutedAll ? 'text-red-600' : 'text-slate-400']"></i>
         <span>{{ isMutedAll ? 'Unmute All' : 'Mute All' }}</span>
       </button>
 
       <label
-        class="flex items-center gap-2 px-2.5 py-1.5 text-[10px] font-bold uppercase tracking-wider bg-white/5 rounded-lg text-white cursor-pointer"
+        class="flex items-center gap-2 px-2.5 py-1.5 text-[10px] font-bold uppercase tracking-wider bg-white rounded-lg text-slate-800 border border-slate-200 cursor-pointer"
         title="Answer microphone requests automatically"
       >
         <input type="checkbox" :checked="autoApproveMic" @change="onSmartMic" class="rounded" />
@@ -66,7 +66,7 @@ function review(requestId: string, approve: boolean) {
 
     <!-- Per-medium policy: what the class has to ask for. -->
     <div class="flex items-center flex-wrap gap-1.5">
-      <span class="text-[9px] font-black uppercase tracking-widest text-slate-400 w-full">
+      <span class="text-[9px] font-black uppercase tracking-widest text-slate-500 w-full">
         Requires approval
       </span>
       <button
@@ -76,8 +76,8 @@ function review(requestId: string, approve: boolean) {
         class="px-2 py-1 text-[9px] font-black uppercase tracking-wider rounded-md border transition-all flex items-center gap-1.5 cursor-pointer"
         :class="
           policy[kind] === 'approval'
-            ? 'bg-amber-500/15 border-amber-400/40 text-amber-300'
-            : 'bg-white/5 border-white/10 text-slate-300 hover:bg-white/10'
+            ? 'bg-amber-50 border-amber-200 text-amber-800'
+            : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-100'
         "
         :title="
           policy[kind] === 'approval'
@@ -93,30 +93,30 @@ function review(requestId: string, approve: boolean) {
 
     <!-- Requests waiting for an answer. -->
     <div v-if="pending.length" class="space-y-1.5">
-      <p class="text-[9px] font-black uppercase tracking-widest text-amber-400">
+      <p class="text-[9px] font-black uppercase tracking-widest text-amber-700">
         {{ pending.length }} request{{ pending.length > 1 ? 's' : '' }} waiting
       </p>
       <div
         v-for="request in pending"
         :key="request.id"
-        class="flex items-center justify-between gap-2 p-2 rounded-lg bg-amber-500/10 border border-amber-500/20"
+        class="flex items-center justify-between gap-2 p-2 rounded-lg bg-amber-50 border border-amber-200"
       >
         <div class="min-w-0">
-          <p class="text-[11px] font-bold text-white truncate">{{ request.participantName }}</p>
-          <p class="text-[10px] text-amber-200/80 capitalize">
+          <p class="text-[11px] font-bold text-slate-900 truncate">{{ request.participantName }}</p>
+          <p class="text-[10px] text-amber-800 capitalize">
             wants the {{ META[request.requestType]?.label.toLowerCase() || request.requestType }}
           </p>
         </div>
         <div class="flex items-center gap-1 shrink-0">
           <button
             @click="review(request.id, true)"
-            class="px-2 py-1 text-[9px] font-black uppercase rounded-md bg-emerald-500/20 text-emerald-300 hover:bg-emerald-500/30 transition-colors cursor-pointer"
+            class="px-2 py-1 text-[9px] font-black uppercase rounded-md bg-emerald-600 text-white hover:bg-emerald-500 transition-colors cursor-pointer"
           >
             Allow
           </button>
           <button
             @click="review(request.id, false)"
-            class="px-2 py-1 text-[9px] font-black uppercase rounded-md bg-red-500/20 text-red-300 hover:bg-red-500/30 transition-colors cursor-pointer"
+            class="px-2 py-1 text-[9px] font-black uppercase rounded-md bg-red-600 text-white hover:bg-red-500 transition-colors cursor-pointer"
           >
             Deny
           </button>

@@ -65,8 +65,22 @@ interface DataMessage {
     | 'moderation'
     | 'permission_request'
     | 'permission_response'
-    | 'cohost';
+    | 'cohost'
+    | 'whiteboard';
   [key: string]: any;
+}
+
+/**
+ * One drawn segment on the whiteboard.
+ *
+ * Coordinates are flat and normalized to 0..1 so a stroke looks the same on a
+ * 4K monitor and a small laptop, and so a packet stays tiny: a segment is a
+ * handful of numbers, not an object graph.
+ */
+export interface WhiteboardStroke {
+  color: string;
+  width: number;
+  points: number[];
 }
 
 /**
@@ -110,6 +124,10 @@ export const useClassroomStore = defineStore('classroom', () => {
   const connectionState = ref<ConnectionState | 'idle' | 'failed'>('idle');
   const hasFailed = ref(false);
   const errorMessage = ref<string | null>(null);
+  // The server's error code when it refuses the join outright (SESSION_ENDED
+  // being the one the classroom reacts to differently), so the view can show
+  // the right screen instead of a generic "connection failed".
+  const joinErrorCode = ref<string | null>(null);
 
   // Local media
   const localStream = shallowRef<MediaStream | null>(null);
@@ -175,9 +193,216 @@ export const useClassroomStore = defineStore('classroom', () => {
    * panel and the inbox away with it.
    */
   function applyCohostFlag(active: boolean) {
+    const wasModerator = isModerator.value;
     isCohost.value = active;
     isModerator.value = joinRole === 'lecturer' || active;
     if (!isModerator.value) pendingRequests.value = [];
+    // Promoted mid-class: the board was already running when they arrived as a
+    // student, and they may now be the one keeping it (a host handover).
+    if (!wasModerator && isModerator.value) {
+      void loadWhiteboard().then(() => publishWhiteboardSnapshot());
+    }
+  }
+
+  // --- whiteboard --------------------------------------------------------
+  // A teaching aid the host drives and everyone else watches. Strokes travel
+  // as one small data packet per segment over the channel the room already
+  // has open, and nothing is written to the database: a board is for the
+  // moment a class is running, and a snapshot packet covers a late joiner.
+  //
+  // Only the session's own host identity may drive it. That is not decoration:
+  // anyone in the room can publish on the topic by hand, so without the check
+  // a student could scribble over the lecture while the host is talking.
+  const whiteboardOpen = ref(false);
+  const whiteboardStrokes = ref<WhiteboardStroke[]>([]);
+  // Bumped when the board is *replaced* (clear, snapshot) rather than
+  // extended, so a canvas knows to rebuild instead of drawing on top.
+  const whiteboardRevision = ref(0);
+  // The user id the server says runs this class; LiveKit identities are user
+  // ids, so this is what a packet's sender is compared against.
+  const sessionHostId = ref<string | null>(null);
+  // Bounds memory and the size of a snapshot. Well past a dense lecture's
+  // worth of drawing, and it keeps a snapshot to a handful of packets.
+  const WHITEBOARD_MAX_STROKES = 1200;
+  const WHITEBOARD_SNAPSHOT_CHUNK = 150;
+  // Debounce for writing the board to the session row. A stroke arrives every
+  // few frames while the host draws, so one request per frame would be absurd;
+  // one every 1.5s of drawing is invisible to the user and cheap on the server.
+  let whiteboardSaveTimer: ReturnType<typeof setTimeout> | null = null;
+  let whiteboardDirty = false;
+
+  /** Told once per session load, from the session row's hostId. */
+  function setSessionHost(userId?: string | null) {
+    if (userId) sessionHostId.value = userId;
+  }
+
+  /**
+   * Did this packet come from somebody the server says runs this class?
+   *
+   * The session's own host, or a co-host the host appointed. Both identities
+   * are answered by the server (the session row and the co-host roster), never
+   * by the packet itself: anyone can publish on the topic by hand, so the check
+   * has to rest on what the server said, not on what the sender claims.
+   */
+  function isWhiteboardAuthor(participant?: RemoteParticipant | null): boolean {
+    if (!participant) return false;
+    const identity = participant.identity;
+    if (sessionHostId.value && identity === sessionHostId.value) return true;
+    return coHostIds.value.includes(identity);
+  }
+
+  function applyWhiteboardAction(msg: any) {
+    switch (msg.action) {
+      case 'open':
+        whiteboardOpen.value = true;
+        break;
+      case 'close':
+        whiteboardOpen.value = false;
+        break;
+      case 'clear':
+        whiteboardStrokes.value = [];
+        whiteboardRevision.value++;
+        break;
+      case 'snapshot': {
+        // A long board arrives in chunks: the first replaces what we have, the
+        // rest extend it.
+        const incoming: WhiteboardStroke[] = Array.isArray(msg.strokes) ? msg.strokes : [];
+        if (msg.reset) {
+          whiteboardStrokes.value = incoming;
+          whiteboardRevision.value++;
+        } else if (whiteboardStrokes.value.length < WHITEBOARD_MAX_STROKES) {
+          whiteboardStrokes.value.push(...incoming);
+        }
+        if (incoming.length || msg.reset) whiteboardOpen.value = true;
+        break;
+      }
+      case 'stroke':
+        if (msg.stroke && whiteboardStrokes.value.length < WHITEBOARD_MAX_STROKES) {
+          whiteboardStrokes.value.push(msg.stroke);
+        }
+        break;
+    }
+  }
+
+  /** Host: open a *blank* board for the room. */
+  async function openWhiteboard() {
+    if (!isModerator.value) return;
+    whiteboardStrokes.value = [];
+    whiteboardRevision.value++;
+    whiteboardOpen.value = true;
+    scheduleWhiteboardSave(0);
+    await publish({ type: 'whiteboard', action: 'open' }, 'whiteboard');
+  }
+
+  async function closeWhiteboard() {
+    if (!isModerator.value) return;
+    whiteboardOpen.value = false;
+    scheduleWhiteboardSave(0);
+    await publish({ type: 'whiteboard', action: 'close' }, 'whiteboard');
+  }
+
+  async function clearWhiteboard() {
+    if (!isModerator.value) return;
+    whiteboardStrokes.value = [];
+    whiteboardRevision.value++;
+    scheduleWhiteboardSave(0);
+    await publish({ type: 'whiteboard', action: 'clear' }, 'whiteboard');
+  }
+
+  /** Host: one finished segment. Drawn locally at once, published immediately. */
+  async function addWhiteboardStroke(stroke: WhiteboardStroke) {
+    if (!isModerator.value || !whiteboardOpen.value) return;
+    if (whiteboardStrokes.value.length >= WHITEBOARD_MAX_STROKES) return;
+    whiteboardStrokes.value.push(stroke);
+    scheduleWhiteboardSave();
+    // Strokes are lossy on purpose: a dropped segment is a hairline gap that
+    // the next packet continues from, while a reliable ordered channel makes
+    // every peer wait behind a stalled packet. Snapshots (a whole board, sent
+    // once to a late joiner) stay reliable -- losing one of those leaves a
+    // hole no later packet can fill.
+    await publish({ type: 'whiteboard', action: 'stroke', stroke }, 'whiteboard', false);
+  }
+
+  /**
+   * Write the board to the session row so it outlives this tab.
+   *
+   * The strokes used to live only in memory and in the data channel, so a
+   * refresh in the middle of a lecture blanked the board (and a host rejoining
+   * from another device lost it entirely). The server copy is what a reload
+   * restores from; the snapshot packet still hands it to everyone in the room.
+   */
+  function scheduleWhiteboardSave(delay = 1500) {
+    if (!isModerator.value) return;
+    whiteboardDirty = true;
+    if (whiteboardSaveTimer) clearTimeout(whiteboardSaveTimer);
+    whiteboardSaveTimer = setTimeout(() => {
+      whiteboardSaveTimer = null;
+      void flushWhiteboardSave();
+    }, delay);
+  }
+
+  async function flushWhiteboardSave(): Promise<void> {
+    const sid = activeSessionId.value;
+    if (!sid || !isModerator.value || !whiteboardDirty) return;
+    whiteboardDirty = false;
+    try {
+      await api.putDocument(`/api/v1/classrooms/sessions/${sid}/whiteboard/`, {
+        open: whiteboardOpen.value,
+        strokes: whiteboardStrokes.value,
+      });
+    } catch (e) {
+      // Keep it dirty and try again: a board that could not be saved must not
+      // look saved. The next stroke, or this retry, carries the whole board.
+      whiteboardDirty = true;
+      console.warn('Could not save the whiteboard:', e);
+      if (!whiteboardSaveTimer) {
+        whiteboardSaveTimer = setTimeout(() => {
+          whiteboardSaveTimer = null;
+          void flushWhiteboardSave();
+        }, 5000);
+      }
+    }
+  }
+
+  /** Restore the board the host was drawing before a reload or a device switch. */
+  async function loadWhiteboard(): Promise<void> {
+    const sid = activeSessionId.value;
+    if (!sid || !isModerator.value) return;
+    try {
+      const board = await api.getDocument<{ open?: boolean; strokes?: WhiteboardStroke[] }>(
+        `/api/v1/classrooms/sessions/${sid}/whiteboard/`
+      );
+      const strokes = Array.isArray(board?.strokes) ? board.strokes : [];
+      if (!strokes.length && !board?.open) return;
+      whiteboardStrokes.value = strokes.slice(0, WHITEBOARD_MAX_STROKES);
+      whiteboardRevision.value++;
+      whiteboardOpen.value = !!board?.open;
+    } catch (e) {
+      // A missing board is normal for a class that never used one; anything
+      // else leaves the board empty rather than blocking the classroom.
+      console.warn('Could not restore the whiteboard:', e);
+    }
+  }
+
+  /** Host: hand the board to whoever just arrived, in bounded packets. */
+  async function publishWhiteboardSnapshot() {
+    if (!isModerator.value || !whiteboardOpen.value) return;
+    const all = whiteboardStrokes.value;
+    if (!all.length) {
+      await publish({ type: 'whiteboard', action: 'snapshot', strokes: [], reset: true }, 'whiteboard');
+      return;
+    }
+    for (let i = 0; i < all.length; i += WHITEBOARD_SNAPSHOT_CHUNK) {
+      await publish(
+        {
+          type: 'whiteboard',
+          action: 'snapshot',
+          strokes: all.slice(i, i + WHITEBOARD_SNAPSHOT_CHUNK),
+          reset: i === 0,
+        },
+        'whiteboard'
+      );
+    }
   }
 
   // --- recording ---------------------------------------------------------
@@ -189,10 +414,69 @@ export const useClassroomStore = defineStore('classroom', () => {
   const recordingError = ref<string | null>(null);
   // Elapsed seconds for the REC timer, ticked only while a recording is live.
   const recordingSeconds = ref(0);
-  let recordingPoll: ReturnType<typeof setInterval> | null = null;
+  let recordingPoll: ReturnType<typeof setTimeout> | null = null;
   let recordingClock: ReturnType<typeof setInterval> | null = null;
 
   const isRecording = computed(() => !!activeRecording.value?.isLive);
+
+  /**
+   * Is the recording still running but this tab unable to see the server?
+   *
+   * Recording is server-side, so a dropped browser connection does not end a
+   * take -- the worker keeps writing the room. The badge says "paused" rather
+   * than simply disappearing, which used to read as "the recording stopped".
+   */
+  const isRecordingPaused = computed(
+    () =>
+      isRecording.value &&
+      !isConnected.value &&
+      (connectionState.value === ConnectionState.Reconnecting ||
+        connectionState.value === ConnectionState.Disconnected)
+  );
+
+  //: Where the live recording is remembered between page loads.
+  const recordingStorageKey = (sessionId: string) => `podium_recording_${sessionId}`;
+
+  /** Keep the last known live recording for this session, or forget it. */
+  function rememberRecording(doc: Recording | null) {
+    const sid = activeSessionId.value;
+    if (!sid || typeof localStorage === 'undefined') return;
+    try {
+      if (doc?.id && doc.isLive) {
+        localStorage.setItem(recordingStorageKey(sid), JSON.stringify(doc));
+      } else {
+        localStorage.removeItem(recordingStorageKey(sid));
+      }
+    } catch {
+      /* private mode / quota: the live status call is still the authority */
+    }
+  }
+
+  /** What this tab last knew, before any request has answered. */
+  function recallRecording(): Recording | null {
+    const sid = activeSessionId.value;
+    if (!sid || typeof localStorage === 'undefined') return null;
+    try {
+      const raw = localStorage.getItem(recordingStorageKey(sid));
+      if (!raw) return null;
+      const doc = JSON.parse(raw) as Recording;
+      return doc?.id && doc.isLive ? doc : null;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Accepted, but the worker's pipeline is not capturing yet.
+   *
+   * The control shows a spinner over this window, but it stays pressable: the
+   * server waits for capture before ending the take, so Stop here is a real
+   * stop. (It used to be disabled instead, which read as a dead button for as
+   * long as a slow worker took to start.)
+   */
+  const isRecordingStarting = computed(
+    () => (activeRecording.value?.status || '').toLowerCase() === 'starting'
+  );
 
   /**
    * DOM registry: identity -> <video> element.
@@ -426,14 +710,35 @@ export const useClassroomStore = defineStore('classroom', () => {
     return false;
   }
 
+  /**
+   * Rebuild the roster, at most once per frame burst.
+   *
+   * Track events arrive in clusters (a camera publishes audio, video and a
+   * metadata update within the same tick), and every rebuild replaces the
+   * whole participant list, which re-renders every tile. One rebuild per 80ms
+   * keeps the tiles in step while turning a burst into a single render.
+   */
+  let rosterUpdateTimer: ReturnType<typeof setTimeout> | null = null;
   function updateParticipants() {
-    const r = room.value;
-    if (!r) return;
-    const localName =
-      participants.value.find((p) => p.isLocal)?.name || 'You';
-    const localRole =
-      participants.value.find((p) => p.isLocal)?.role || 'student';
-    syncRoster(r, localName, localRole);
+    if (rosterUpdateTimer !== null) return;
+    rosterUpdateTimer = setTimeout(() => {
+      rosterUpdateTimer = null;
+      const r = room.value;
+      if (!r) return;
+      const localName =
+        participants.value.find((p) => p.isLocal)?.name || 'You';
+      const localRole =
+        participants.value.find((p) => p.isLocal)?.role || 'student';
+      syncRoster(r, localName, localRole);
+    }, 80);
+  }
+
+  /** Drop a queued roster rebuild (leaving the room, unmounting). */
+  function cancelParticipantsUpdate() {
+    if (rosterUpdateTimer !== null) {
+      clearTimeout(rosterUpdateTimer);
+      rosterUpdateTimer = null;
+    }
   }
 
   function addReaction(emoji: string) {
@@ -497,12 +802,12 @@ export const useClassroomStore = defineStore('classroom', () => {
     if (kind === 'screen' && !isScreenSharing.value) await toggleScreenShare();
   }
 
-  async function publish(payload: DataMessage, topic: string) {
+  async function publish(payload: DataMessage, topic: string, reliable = true) {
     const r = room.value;
     if (!r) return;
     try {
       const bytes = new TextEncoder().encode(JSON.stringify(payload));
-      await r.localParticipant.publishData(bytes, { reliable: true, topic });
+      await r.localParticipant.publishData(bytes, { reliable, topic });
     } catch (e) {
       console.warn('Data publish failed', e);
     }
@@ -558,10 +863,11 @@ export const useClassroomStore = defineStore('classroom', () => {
             (h) => h.identity !== identity
           );
         }
-        // Keep roster badges in sync.
-        participants.value = participants.value.map((p) =>
-          p.identity === identity ? { ...p, isHandRaised: !!msg.raised } : p
-        );
+        // Keep the roster badge in sync by touching that one tile. Replacing
+        // the array here would give every tile a new object, and in a
+        // 200-person room one raised hand would re-render all 200.
+        const handTile = participants.value.find((p) => p.identity === identity);
+        if (handTile) handTile.isHandRaised = !!msg.raised;
         break;
       }
       case 'moderation': {
@@ -593,6 +899,17 @@ export const useClassroomStore = defineStore('classroom', () => {
         // grant of authority.
         void loadCoHosts();
         if (msg.userId === myIdentity) void loadOwnPermissions();
+        break;
+      }
+      case 'whiteboard': {
+        // Host-driven only: see the whiteboard block above for why.
+        if (!isWhiteboardAuthor(participant)) break;
+        applyWhiteboardAction(msg);
+        // A student's board is a live view of the host's copy, and the host's
+        // copy is the one that gets written down. Never echo a student's view
+        // over the board that will be restored from next time.
+        if (!isModerator.value) break;
+        if (msg.action !== 'stroke') scheduleWhiteboardSave(0);
         break;
       }
       case 'permission_response': {
@@ -643,6 +960,12 @@ export const useClassroomStore = defineStore('classroom', () => {
         // source of truth, so re-read it instead of trusting the stale state
         // we went into the drop with.
         void resyncModeration();
+        // A recording keeps running through this tab's outage; re-read it so
+        // the badge comes back honest (and the stop button acts on the right
+        // id) instead of waiting for the next poll.
+        void resumeRecordingState();
+        // Strokes drawn during the outage never reached the room.
+        void publishWhiteboardSnapshot();
       })
       .on(RoomEvent.ConnectionStateChanged, (state: ConnectionState) => {
         connectionState.value = state;
@@ -654,6 +977,8 @@ export const useClassroomStore = defineStore('classroom', () => {
         // room that is out of date. Re-read first -- broadcasting our own
         // cache would let a stale snapshot overwrite what they just fetched.
         if (isModerator.value) void resyncModeration().then(() => publishModeration());
+        // A late joiner missed every stroke drawn before they arrived.
+        void publishWhiteboardSnapshot();
       })
       .on(RoomEvent.ParticipantDisconnected, () => updateParticipants())
       .on(RoomEvent.TrackSubscribed, () => updateParticipants())
@@ -661,11 +986,14 @@ export const useClassroomStore = defineStore('classroom', () => {
       .on(RoomEvent.LocalTrackPublished, () => updateParticipants())
       .on(RoomEvent.LocalTrackUnpublished, () => updateParticipants())
       .on(RoomEvent.ActiveSpeakersChanged, () => {
+        // Mutate only the tiles whose speaking state actually moved. This event
+        // fires continuously in a busy room, so rebuilding the array would hand
+        // every tile a new object and re-render the whole grid on each call.
         const speakers = new Set(r.activeSpeakers.map((s) => s.identity));
-        participants.value = participants.value.map((p) => ({
-          ...p,
-          isSpeaking: speakers.has(p.identity),
-        }));
+        for (const p of participants.value) {
+          const speaking = speakers.has(p.identity);
+          if (speaking !== p.isSpeaking) p.isSpeaking = speaking;
+        }
       })
       .on(RoomEvent.DataReceived, (payload, participant?: RemoteParticipant) => {
         handleData(payload as Uint8Array, participant);
@@ -680,6 +1008,7 @@ export const useClassroomStore = defineStore('classroom', () => {
     isConnecting.value = true;
     hasFailed.value = false;
     errorMessage.value = null;
+    joinErrorCode.value = null;
     connectionState.value = 'idle';
     activeSessionId.value = sessionId;
     // The moderator is exempt from every lock; everyone else starts closed and
@@ -689,18 +1018,26 @@ export const useClassroomStore = defineStore('classroom', () => {
     joinRole = role;
     isModerator.value = role === 'lecturer';
     void loadChatHistory(sessionId);
+    // A take remembered from before the reload: show the REC badge and clock
+    // from the first frame, then reconcile with the server below.
+    const cachedRecording = recallRecording();
+    if (cachedRecording) applyActiveRecording(cachedRecording);
 
     try {
-      // 1. Request a LiveKit token from Django.
+      // 1. Request a LiveKit token from Django, for this class by id.
+      //
+      // The session-scoped route is the one that enforces the class's state:
+      // it refuses a class the host has ended and reopens it when the host
+      // returns. The generic /classrooms/token/ route takes a room name and
+      // checks nothing, so going through it left "you cannot rejoin an ended
+      // class" resting on client-side checks that a refresh could skip.
       const tokenDoc = await api.postDocument<{
         token: string;
         roomName: string;
         identity: string;
         livekitUrl?: string;
-      }>('/api/v1/classrooms/token/', {
-        roomName: sessionId,
+      }>(`/api/v1/classrooms/sessions/${sessionId}/token/`, {
         participantName,
-        participantId: undefined,
         role,
       });
 
@@ -742,11 +1079,17 @@ export const useClassroomStore = defineStore('classroom', () => {
       // halfway) -- pick it up so nobody's UI lies about the lecture being
       // unrecorded.
       void resumeRecordingState();
+      // Same for the board: restore the host's copy, then hand it to whoever
+      // is already in the room.
+      if (isModerator.value) {
+        void loadWhiteboard().then(() => publishWhiteboardSnapshot());
+      }
       return newRoom;
     } catch (e: any) {
       console.error('Classroom connection failed:', e);
       hasFailed.value = true;
       connectionState.value = 'failed';
+      joinErrorCode.value = e?.code || null;
       errorMessage.value =
         e?.message ||
         'Could not connect to the LiveKit server. Check your connection and try again.';
@@ -1144,9 +1487,8 @@ export const useClassroomStore = defineStore('classroom', () => {
     isHandRaised.value = raised;
     const identity = room.value?.localParticipant.identity || '';
     await publish({ type: 'hand', raised, identity, name }, 'hand');
-    participants.value = participants.value.map((p) =>
-      p.isLocal ? { ...p, isHandRaised: raised } : p
-    );
+    const selfTile = participants.value.find((p) => p.isLocal);
+    if (selfTile) selfTile.isHandRaised = raised;
   }
 
   /**
@@ -1343,7 +1685,7 @@ export const useClassroomStore = defineStore('classroom', () => {
 
   function stopRecordingPoll() {
     if (recordingPoll) {
-      clearInterval(recordingPoll);
+      clearTimeout(recordingPoll);
       recordingPoll = null;
     }
   }
@@ -1364,11 +1706,22 @@ export const useClassroomStore = defineStore('classroom', () => {
       activeRecording.value = null;
       stopRecordingClock();
       stopRecordingPoll();
-      if (wasLive) void loadRecordings();
+      rememberRecording(null);
+      recordingSeconds.value = 0;
+      if (wasLive) {
+        // A recording that ends on its own ended badly: say why, in the same
+        // banner the classroom already uses for recording news, rather than
+        // letting the REC badge simply disappear.
+        if (doc.status === 'failed' || doc.status === 'aborted') {
+          pushSystemMessage(doc.error || 'The recording did not finish.');
+        }
+        void loadRecordings();
+      }
       return;
     }
 
     activeRecording.value = doc;
+    rememberRecording(doc);
     if (wasLive) return;
 
     recordingSeconds.value = doc.startedAt
@@ -1377,10 +1730,23 @@ export const useClassroomStore = defineStore('classroom', () => {
     recordingClock = setInterval(() => {
       recordingSeconds.value += 1;
     }, 1000);
-    recordingPoll = setInterval(async () => {
+    scheduleRecordingPoll();
+  }
+
+  /**
+   * Poll the live recording, faster while the pipeline is coming up.
+   *
+   * Self-scheduling rather than a fixed interval: the row is only interesting
+   * for a second or two after start (the control is showing "Starting..."),
+   * and then it is a five-second heartbeat for the rest of the lecture.
+   */
+  function scheduleRecordingPoll(delay = 1200) {
+    stopRecordingPoll();
+    recordingPoll = setTimeout(async () => {
       const sid = activeSessionId.value;
       const id = activeRecording.value?.id;
       if (!sid || !id) return;
+      let failed = false;
       try {
         const fresh = await api.getDocument<Recording>(
           `/api/v1/classrooms/sessions/${sid}/recordings/${id}/`
@@ -1388,26 +1754,46 @@ export const useClassroomStore = defineStore('classroom', () => {
         applyActiveRecording(fresh);
       } catch {
         // A dropped poll changes nothing: the server's row is still the truth
-        // and the next tick catches up.
+        // and the next tick catches up. While the browser is offline the poll
+        // backs off instead of retrying every tick, so a flaky connection does
+        // not spend the whole bandwidth budget on status calls.
+        failed = true;
       }
-    }, 5000);
+      // Finishing (or leaving) stops the chain; applyActiveRecording has
+      // already cleared activeRecording in that case.
+      if (activeRecording.value?.id === id) {
+        const next = failed
+          ? 10000
+          : isRecordingStarting.value
+            ? 1200
+            : 5000;
+        scheduleRecordingPoll(next);
+      }
+    }, delay);
   }
 
-  /** Everything recorded for this session, newest first -- the replay shelf. */
-  async function loadRecordings() {
+  /**
+   * Everything recorded for this session, newest first -- the replay shelf.
+   *
+   * Answers whether the read actually succeeded: a caller reconciling the live
+   * badge must not treat "the network was down" as "nothing is recording".
+   */
+  async function loadRecordings(): Promise<boolean> {
     const sid = activeSessionId.value;
-    if (!sid) return;
+    if (!sid) return false;
     try {
       const res = await api.getDocuments<Recording>(
         `/api/v1/classrooms/sessions/${sid}/recordings/`
       );
       recordings.value = res.documents ?? [];
+      return true;
     } catch (e) {
       // Recordings switched off by an admin is a configuration, not a fault;
       // the button that would call this is hidden in that case anyway.
       if ((e as { code?: string })?.code !== 'FEATURE_DISABLED') {
         console.warn('Could not load recordings:', e);
       }
+      return false;
     }
   }
 
@@ -1415,17 +1801,36 @@ export const useClassroomStore = defineStore('classroom', () => {
    * Re-attach to a recording that is already running: a host who refreshes
    * mid-lecture, or a co-host who joins halfway through. Without this the
    * server would keep writing an MP4 that nobody's UI knows about.
+   *
+   * The cached id is applied *before* this runs, so the REC badge is on screen
+   * from the first frame after a reload; this call then reconciles it with the
+   * server, and drops it if the take finished while the tab was gone.
    */
   async function resumeRecordingState() {
-    await loadRecordings();
+    const ok = await loadRecordings();
+    if (!ok) return;
     const live = recordings.value.find((r) => r.isLive) || null;
-    if (live) applyActiveRecording(live);
+    if (live) {
+      applyActiveRecording(live);
+      return;
+    }
+    if (activeRecording.value) {
+      activeRecording.value = null;
+      stopRecordingClock();
+      stopRecordingPoll();
+      recordingSeconds.value = 0;
+      rememberRecording(null);
+    }
   }
 
   /** Ask the server to start recording this room (server-side MP4). */
   async function startRecording(): Promise<boolean> {
     const sid = activeSessionId.value;
     if (!sid || isRecording.value) return false;
+    // If the session is no longer active (ended/deleted), there is nothing to
+    // record — return early without showing an error in chat.
+    const sessionDoc = await api.getDocument<ClassroomSession>(`/api/v1/classrooms/sessions/${sid}/`).catch(() => null);
+    if (!sessionDoc?.is_active) return false;
     recordingError.value = null;
     try {
       const doc = await api.postDocument<Recording>(
@@ -1464,7 +1869,18 @@ export const useClassroomStore = defineStore('classroom', () => {
       pushSystemMessage('Finishing the recording...');
       return true;
     } catch (e) {
-      recordingError.value = (e as { message?: string })?.message || 'The recording could not be stopped.';
+      const err = e as { message?: string; code?: string; status?: number };
+      if (err.status === 404 || err.code === 'NOT_FOUND') {
+        // The remembered take does not exist any more (cleared database, a
+        // deleted class). Forget it, so the control offers Record again
+        // rather than a stop that can never work.
+        activeRecording.value = null;
+        stopRecordingClock();
+        stopRecordingPoll();
+        recordingSeconds.value = 0;
+        rememberRecording(null);
+      }
+      recordingError.value = err.message || 'The recording could not be stopped.';
       pushSystemMessage(recordingError.value);
       console.warn('Could not stop recording:', e);
       return false;
@@ -1542,10 +1958,21 @@ export const useClassroomStore = defineStore('classroom', () => {
       void publish({ type: 'hand', raised: false, identity: h.identity, name: h.name }, 'hand');
     });
     raisedHands.value = [];
-    participants.value = participants.value.map((p) => ({ ...p, isHandRaised: false }));
+    for (const p of participants.value) {
+      if (p.isHandRaised) p.isHandRaised = false;
+    }
   }
 
   async function leaveClassroom() {
+    // Anything drawn since the last save belongs on the server before this tab
+    // forgets it. The request captures the strokes synchronously, so it is
+    // safe to clear the local copy immediately below.
+    if (whiteboardDirty) void flushWhiteboardSave();
+    if (whiteboardSaveTimer) {
+      clearTimeout(whiteboardSaveTimer);
+      whiteboardSaveTimer = null;
+    }
+    cancelParticipantsUpdate();
     localStream.value?.getTracks().forEach((t) => t.stop());
     localStream.value = null;
     localAudioStream.value?.getTracks().forEach((t) => t.stop());
@@ -1578,6 +2005,9 @@ export const useClassroomStore = defineStore('classroom', () => {
     // the room, which outlives this tab (it finalises when the room closes).
     stopRecordingClock();
     stopRecordingPoll();
+    // The remembered id stays in localStorage on purpose: leaving the page is
+    // what a refresh looks like from here, and the next join should pick the
+    // same take straight back up.
     activeRecording.value = null;
     recordingSeconds.value = 0;
     recordingError.value = null;
@@ -1588,6 +2018,12 @@ export const useClassroomStore = defineStore('classroom', () => {
     myPermissions.value = { mic: false, camera: false, screen: false };
     requestedKinds.value = { mic: false, camera: false, screen: false };
     pendingRequests.value = [];
+    // The board belongs to the sitting, not to this tab: leaving closes our
+    // view of it and drops the strokes with it.
+    whiteboardOpen.value = false;
+    whiteboardStrokes.value = [];
+    whiteboardRevision.value++;
+    sessionHostId.value = null;
   }
 
   return {
@@ -1598,6 +2034,7 @@ export const useClassroomStore = defineStore('classroom', () => {
     connectionState,
     hasFailed,
     errorMessage,
+    joinErrorCode,
     localStream,
     localAudioStream,
     localScreenStream,
@@ -1616,11 +2053,26 @@ export const useClassroomStore = defineStore('classroom', () => {
     isModerator,
     isCohost,
     coHostIds,
+    // whiteboard
+    whiteboardOpen,
+    whiteboardStrokes,
+    whiteboardRevision,
+    sessionHostId,
+    setSessionHost,
+    openWhiteboard,
+    closeWhiteboard,
+    clearWhiteboard,
+    addWhiteboardStroke,
+    publishWhiteboardSnapshot,
+    loadWhiteboard,
+    flushWhiteboardSave,
     recordings,
     activeRecording,
     recordingSeconds,
     recordingError,
     isRecording,
+    isRecordingStarting,
+    isRecordingPaused,
     isMutedAll,
     autoApproveMic,
     permissionPolicy,

@@ -99,6 +99,7 @@
 import { ref, onMounted } from 'vue';
 import { useAuthStore } from '../stores/auth';
 import { api } from '../api/client';
+import { toast, errorText } from '../stores/toast';
 
 const authStore = useAuthStore();
 const showTopupModal = ref(false);
@@ -137,7 +138,7 @@ async function handleTopup() {
     showTopupModal.value = false;
     await loadTransactions();
   } catch (err: any) {
-    alert(err?.message || 'Top up failed');
+    toast.error('Top up failed', errorText(err, 'The payment was not completed.'));
   } finally {
     isProcessing.value = false;
   }

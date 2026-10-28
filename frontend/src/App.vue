@@ -175,6 +175,10 @@
       <router-view />
     </main>
   </div>
+
+  <!-- App-wide toasts: the same feedback on every page, including the
+       fullscreen classroom, which renders outside the shell above. -->
+  <ToastHost />
 </template>
 
 <script setup lang="ts">
@@ -182,6 +186,7 @@ import { ref, computed, onMounted } from 'vue';
 import { useRouter, useRoute } from 'vue-router';
 import { useAuthStore } from './stores/auth';
 import { useFeaturesStore } from './stores/features';
+import ToastHost from './components/ToastHost.vue';
 
 const router = useRouter();
 const route = useRoute();

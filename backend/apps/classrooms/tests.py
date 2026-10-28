@@ -1,4 +1,6 @@
 import json
+from unittest.mock import patch
+
 from django.test import TestCase
 from rest_framework.test import APIClient
 from apps.accounts.auth import issue_token
@@ -33,7 +35,12 @@ class ClassroomApiTests(TestCase):
         # Verify Document Object enforcement
         self.assertIn("document", data)
         self.assertEqual(data["document"]["title"], "Advanced Algorithmic Thinking")
-        self.assertEqual(data["document"]["status"], "active")
+        # A created class is prepared, not running: the room opens when the host
+        # arrives in it, so students cannot wander into an empty one and the
+        # class's clock does not start while the host is still setting up.
+        self.assertEqual(data["document"]["status"], "scheduled")
+        self.assertFalse(data["document"]["is_active"])
+        self.assertIsNone(data["document"]["startedAt"])
         session_id = data["document"]["id"]
 
         # 2. List Sessions
@@ -78,6 +85,30 @@ class ClassroomApiTests(TestCase):
         self.assertEqual(data["document"]["status"], "ended")
         self.assertFalse(data["document"]["is_active"])
 
+    def test_delete_session_soft_deletes_and_hides_it(self):
+        session = Session.objects.create(
+            id="ses_to_delete_99",
+            title="Discrete Maths",
+            host=self.user,
+            meeting_code="POD-DM99",
+            status="active",
+            is_active=True,
+        )
+        res = self.client.delete(f"/api/v1/classrooms/sessions/{session.id}/")
+        self.assertEqual(res.status_code, 200)
+        self.assertTrue(res.json()["document"]["deleted"])
+
+        # The row survives for history, flagged deleted rather than removed.
+        session.refresh_from_db()
+        self.assertTrue(session.is_deleted)
+
+        # It disappears from the list and reads as 404 directly.
+        docs = self.client.get("/api/v1/classrooms/sessions/").json()["documents"]
+        self.assertFalse(any(s["id"] == session.id for s in docs))
+        self.assertEqual(
+            self.client.get(f"/api/v1/classrooms/sessions/{session.id}/").status_code, 404
+        )
+
 
 class ClassroomAuthzTests(TestCase):
     """Guards that the endpoints are no longer anonymous."""
@@ -112,6 +143,13 @@ class ClassroomAuthzTests(TestCase):
         self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {issue_token(self.student)}")
         res = self.client.post(f"/api/v1/classrooms/sessions/{self.session.id}/end/")
         self.assertEqual(res.status_code, 403)
+
+    def test_student_cannot_delete_someone_elses_session(self):
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {issue_token(self.student)}")
+        res = self.client.delete(f"/api/v1/classrooms/sessions/{self.session.id}/")
+        self.assertEqual(res.status_code, 403)
+        self.session.refresh_from_db()
+        self.assertFalse(self.session.is_deleted)
 
     def test_student_cannot_escalate_livekit_role(self):
         # Student asks for lecturer; the granted privileges must still be a
@@ -706,3 +744,106 @@ class CoHostTests(TestCase):
         self.client.delete(self.url(f"cohosts/{self.student.id}/"))
         self.session.refresh_from_db()
         self.assertIsNone(self.session.backup_mod_id)
+
+
+class WhiteboardTests(TestCase):
+    """
+    The host's board is stored on the session, so a refresh does not wipe the
+    lecture. Only whoever runs the class may write (or read) the durable copy;
+    students draw nothing and watch the live board from the room.
+    """
+
+    VALID_STROKE = {"color": "#1845D4", "width": 0.003, "points": [0.1, 0.2, 0.3, 0.4]}
+
+    def setUp(self):
+        self.client = APIClient()
+        self.lecturer = User.objects.create(
+            id="usr_wb_lect", email="wb-lect@test.com", full_name="Dr. Board",
+            role="lecturer",
+        )
+        self.student = User.objects.create(
+            id="usr_wb_stu", email="wb-stu@test.com", full_name="Kofi Board",
+            role="student",
+        )
+        self.session = Session.objects.create(
+            id="ses_wb_1", title="Whiteboard Lab", host=self.lecturer,
+            meeting_code="POD-WB1", status="active", is_active=True,
+        )
+        self.url = f"/api/v1/classrooms/sessions/{self.session.id}/whiteboard/"
+
+    def _auth(self, user):
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {issue_token(user)}")
+
+    def test_the_host_can_save_and_read_the_board_back(self):
+        self._auth(self.lecturer)
+        res = self.client.put(
+            self.url,
+            {"open": True, "strokes": [self.VALID_STROKE]},
+            format="json",
+        )
+        self.assertEqual(res.status_code, 200)
+        doc = res.json()["document"]
+        self.assertTrue(doc["open"])
+        self.assertEqual(len(doc["strokes"]), 1)
+        self.assertEqual(doc["strokes"][0]["points"], [0.1, 0.2, 0.3, 0.4])
+        self.assertTrue(doc["updatedAt"])
+
+        # A fresh tab reads exactly what was drawn.
+        again = self.client.get(self.url).json()["document"]
+        self.assertTrue(again["open"])
+        self.assertEqual(again["strokes"], doc["strokes"])
+
+    def test_a_student_can_neither_read_nor_write_the_durable_board(self):
+        self._auth(self.student)
+        self.assertEqual(self.client.get(self.url).status_code, 403)
+        self.assertEqual(
+            self.client.put(self.url, {"open": True, "strokes": []}, format="json").status_code,
+            403,
+        )
+        self.session.refresh_from_db()
+        self.assertIsNone(self.session.whiteboard)
+
+    def test_a_malformed_stroke_is_refused_rather_than_stored(self):
+        self._auth(self.lecturer)
+        bad_payloads = [
+            {"open": "yes", "strokes": []},
+            {"open": True, "strokes": [{"color": "#fff", "width": 0.003, "points": [0.1]}]},
+            {"open": True, "strokes": [{"color": "#fff", "width": 0.003, "points": [0.1, 0.2, 0.3]}]},
+            {"open": True, "strokes": [{"color": "#fff", "width": 0.003, "points": [1.4, 0.2, 0.3, 0.4]}]},
+            {"open": True, "strokes": [{"color": "#fff", "width": 4, "points": [0.1, 0.2, 0.3, 0.4]}]},
+            {"open": True, "strokes": [{"color": "#fff", "width": 0.003, "points": ["a", 0.2, 0.3, 0.4]}]},
+        ]
+        for payload in bad_payloads:
+            res = self.client.put(self.url, payload, format="json")
+            self.assertEqual(res.status_code, 400, payload)
+        self.session.refresh_from_db()
+        self.assertIsNone(self.session.whiteboard)
+
+    def test_a_cleared_board_is_still_a_saved_board(self):
+        # Clearing must be persisted, otherwise the next refresh restores the
+        # drawing the host just erased.
+        self._auth(self.lecturer)
+        self.client.put(self.url, {"open": True, "strokes": [self.VALID_STROKE]}, format="json")
+        res = self.client.put(self.url, {"open": True, "strokes": []}, format="json")
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(res.json()["document"]["strokes"], [])
+
+    @patch("apps.classrooms.views.delete_livekit_room", return_value=True)
+    def test_ending_the_class_starts_the_next_one_on_a_blank_board(self, _delete):
+        self._auth(self.lecturer)
+        self.client.put(self.url, {"open": True, "strokes": [self.VALID_STROKE]}, format="json")
+        res = self.client.post(f"/api/v1/classrooms/sessions/{self.session.id}/end/")
+        self.assertEqual(res.status_code, 200)
+        self.session.refresh_from_db()
+        self.assertIsNone(self.session.whiteboard)
+
+        # The host reopening the class gets an empty board, not last week's.
+        doc = self.client.get(self.url).json()["document"]
+        self.assertFalse(doc["open"])
+        self.assertEqual(doc["strokes"], [])
+
+    def test_an_unknown_session_is_404(self):
+        self._auth(self.lecturer)
+        url = "/api/v1/classrooms/sessions/ses_nope/whiteboard/"
+        self.assertEqual(self.client.get(url).status_code, 404)
+        self.assertEqual(self.client.put(url, {"open": False, "strokes": []}, format="json").status_code, 404)

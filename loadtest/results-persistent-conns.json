@@ -1,0 +1,86 @@
+{
+  "label": "persistent-conns",
+  "students": 200,
+  "session_id": "loadtest-200",
+  "join_burst_seconds": 5.66,
+  "hold_seconds": 25.0,
+  "join_phase": [
+    {
+      "endpoint": "GET /sessions/{id}",
+      "count": 200,
+      "statuses": {
+        "200": 200
+      },
+      "p50": 4207.4,
+      "p95": 9296.7,
+      "p99": 9606.8,
+      "max": 9739.6,
+      "mean": 4394.7
+    },
+    {
+      "endpoint": "POST /attendance/join",
+      "count": 135,
+      "statuses": {
+        "200": 135
+      },
+      "p50": 282.0,
+      "p95": 396.7,
+      "p99": 451.3,
+      "max": 455.1,
+      "mean": 290.0
+    },
+    {
+      "endpoint": "POST /sessions/{id}/token",
+      "count": 139,
+      "statuses": {
+        "200": 139
+      },
+      "p50": 208.6,
+      "p95": 295.6,
+      "p99": 337.0,
+      "max": 366.0,
+      "mean": 211.9
+    }
+  ],
+  "steady_phase": [
+    {
+      "endpoint": "GET /verification/active",
+      "count": 1205,
+      "statuses": {
+        "200": 1205
+      },
+      "p50": 139.4,
+      "p95": 460.5,
+      "p99": 658.6,
+      "max": 738.2,
+      "mean": 183.1
+    },
+    {
+      "endpoint": "POST /attendance/join",
+      "count": 65,
+      "statuses": {
+        "200": 65
+      },
+      "p50": 383.4,
+      "p95": 748.7,
+      "p99": 792.2,
+      "max": 815.8,
+      "mean": 432.7
+    },
+    {
+      "endpoint": "POST /sessions/{id}/token",
+      "count": 61,
+      "statuses": {
+        "200": 61
+      },
+      "p50": 319.0,
+      "p95": 481.2,
+      "p99": 568.9,
+      "max": 639.3,
+      "mean": 331.3
+    }
+  ],
+  "steady_rps": 48.2,
+  "steady_first_10s_p95": 604.9,
+  "steady_last_10s_p95": 200.2
+}

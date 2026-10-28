@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Only the exports folder is exposed: a content:// URI cannot walk out of
+     the directory named here. -->
+<paths>
+    <cache-path name="exports" path="exports/" />
+</paths>

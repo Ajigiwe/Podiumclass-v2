@@ -270,7 +270,7 @@ class StudentHistoryView(ExternalApiView):
 
         sessions = (
             Session.objects
-            .filter(is_deleted=False, created_at__gte=start, created_at__lte=end)
+            .filter(created_at__gte=start, created_at__lte=end)
             .order_by("-created_at", "-id")[:MAX_SESSIONS]
         )
         session_by_id = {s.id: s for s in sessions}
@@ -368,7 +368,7 @@ class AttendanceExportView(ExternalApiView):
 
         truncated = False
         if session_id:
-            session = Session.objects.filter(pk=session_id, is_deleted=False).first()
+            session = Session.objects.filter(pk=session_id).first()
             if session is None:
                 raise NotFound({
                     "code": "SESSION_NOT_FOUND",
@@ -377,7 +377,7 @@ class AttendanceExportView(ExternalApiView):
             sessions = [session]
         else:
             qs = Session.objects.filter(
-                is_deleted=False, created_at__gte=start, created_at__lte=end
+                created_at__gte=start, created_at__lte=end
             ).order_by("created_at", "id")
 
             course = request.query_params.get("course")

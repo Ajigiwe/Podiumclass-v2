@@ -40,6 +40,10 @@ class Session(models.Model):
     ended_at = models.DateTimeField(null=True, blank=True)
     group_id = models.CharField(max_length=128, null=True, blank=True)
     metadata = models.JSONField(null=True, blank=True)
+    # The host's board, as drawn: {open, strokes, updatedAt}. Written by the
+    # classroom at a debounced pace so a refresh (or a host rejoining from
+    # another device) restores the same board instead of a blank canvas.
+    whiteboard = models.JSONField(null=True, blank=True)
 
     class Meta:
         db_table = "sessions"
