@@ -1,0 +1,135 @@
+# Render blueprint for the Podium API.
+#
+#   Dashboard -> New -> Blueprint -> pick this repository.
+#
+# This deploys only the API and its database. The web interface is built
+# separately and hosted as static files (fPanel); calls and recording come from
+# LiveKit Cloud. Nothing here needs Docker: gunicorn runs directly on Render's
+# Python runtime, and WhiteNoise serves the Django admin's static files because
+# there is no nginx in front of the process.
+#
+# Secrets are marked `sync: false`: Render prompts for them on first deploy and
+# stores them encrypted. They are never written into this file.
+
+databases:
+  - name: podium-db
+    databaseName: podium
+    user: podium
+    # Free Postgres is fine for a trial and expires after ~30 days; move to a
+    # paid plan before real classes depend on it.
+    plan: free
+    region: frankfurt
+
+services:
+  - type: web
+    name: podium-api
+    runtime: python
+    plan: free
+    region: frankfurt
+    # The Django project lives in backend/, not at the repository root.
+    rootDir: backend
+    buildCommand: "pip install -r requirements.txt && python manage.py collectstatic --noinput"
+    # Migrations run here rather than in a pre-deploy command: pre-deploy
+    # commands need a paid instance, and skipping them on the free plan would
+    # serve requests against an empty schema. `migrate` is a no-op once the
+    # schema is current, so running it on every boot costs a second.
+    # `ensure_admin` exists because a free instance has no Shell, so
+    # createsuperuser cannot be run by hand; it does nothing unless the
+    # DJANGO_ADMIN_* variables are set.
+    startCommand: "python manage.py migrate --noinput && python manage.py ensure_admin && gunicorn config.wsgi:application --bind 0.0.0.0:$PORT --workers 2 --threads 4 --timeout 120 --access-logfile -"
+    # Readiness, not liveness: it checks the database and pending migrations, so
+    # a deploy that cannot reach Postgres never replaces a working instance.
+    healthCheckPath: /health/ready
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.3
+      - key: DJANGO_DEBUG
+        value: "False"
+      - key: DJANGO_SECRET_KEY
+        generateValue: true
+      - key: ALLOWED_HOSTS
+        value: podium-api.onrender.com
+      # Render terminates TLS and forwards X-Forwarded-Proto; without this
+      # Django treats every request as plain http and the admin's CSRF check
+      # fails. The redirect itself is Render's job, so Django must not repeat it
+      # (it would redirect the internal health probe in a loop).
+      - key: DJANGO_BEHIND_PROXY
+        value: "true"
+      - key: DJANGO_SECURE_SSL_REDIRECT
+        value: "False"
+      - key: USE_POSTGRES
+        value: "true"
+      - key: DATABASE_URL
+        fromDatabase:
+          name: podium-db
+          property: connectionString
+      # The static front end's origin. The browser calls this API cross-origin,
+      # so every origin the SPA is served from belongs here.
+      - key: CORS_ALLOWED_ORIGINS
+        value: https://minatoflash82.ifnotus.space
+      - key: CSRF_TRUSTED_ORIGINS
+        value: https://podium-api.onrender.com
+      # Bootstrap administrator. Render prompts for these on first deploy
+      # because of `sync: false`; the start command creates (or repairs) the
+      # account on boot, since the free plan has no Shell to run
+      # createsuperuser in. Unset both afterwards.
+      - key: DJANGO_ADMIN_EMAIL
+        sync: false
+      - key: DJANGO_ADMIN_PASSWORD
+        sync: false
+      # LiveKit Cloud: the project's URL, key and secret. Room tokens are signed
+      # with this pair, so a wrong value makes every join fail with an
+      # unhelpful "invalid token".
+      - key: LIVEKIT_URL
+        sync: false
+      - key: LIVEKIT_API_KEY
+        sync: false
+      - key: LIVEKIT_API_SECRET
+        sync: false
+      # Render's filesystem is ephemeral: these survive while the instance is up
+      # and are lost on every deploy and restart. Fine for a trial; the real fix
+      # is object storage, which recordings need anyway (LiveKit Cloud egress
+      # writes to a bucket, not to local disk).
+      - key: RECORDINGS_ROOT
+        value: /tmp/recordings
+      - key: MATERIALS_ROOT
+        value: /tmp/materials
+      - key: AVATARS_ROOT
+        value: /tmp/avatars
+      - key: MAX_UPLOAD_BYTES
+        value: "104857600"
+
+# ---------------------------------------------------------------------------
+# Attendance checker.
+#
+# Checks are due every `intervalMinutes` (15 by default) per session, not every
+# few seconds -- `run_attendance_checker --once` scans, fires whatever is due and
+# exits, which is exactly a cron job's shape. Without it, checks only happen
+# while a host's browser tab is open.
+#
+# Cron jobs require a paid instance type, so this is commented out to keep the
+# trial deploy free. Uncomment once billing is set up.
+# ---------------------------------------------------------------------------
+#  - type: cron
+#    name: podium-attendance-checker
+#    runtime: python
+#    plan: starter
+#    region: frankfurt
+#    rootDir: backend
+#    schedule: "* * * * *"
+#    buildCommand: "pip install -r requirements.txt"
+#    startCommand: python manage.py run_attendance_checker --once
+#    envVars:
+#      - key: DJANGO_DEBUG
+#        value: "False"
+#      - key: DJANGO_SECRET_KEY
+#        fromService:
+#          type: web
+#          name: podium-api
+#          envVarKey: DJANGO_SECRET_KEY
+#      - key: USE_POSTGRES
+#        value: "true"
+#      - key: DATABASE_URL
+#        fromDatabase:
+#          name: podium-db
+#          property: connectionString

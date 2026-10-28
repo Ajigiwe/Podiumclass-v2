@@ -123,6 +123,14 @@ if not SECRET_KEY:
 # accepts any value and enables Host-header attacks (cache poisoning,
 # password-reset link injection).
 ALLOWED_HOSTS = env_list('ALLOWED_HOSTS')
+
+# Render injects the service's public hostname at runtime rather than at build
+# time. Trusting it here keeps the blueprint free of a domain that would have to
+# be edited whenever the service is renamed.
+RENDER_EXTERNAL_HOSTNAME = os.getenv('RENDER_EXTERNAL_HOSTNAME')
+if RENDER_EXTERNAL_HOSTNAME and RENDER_EXTERNAL_HOSTNAME not in ALLOWED_HOSTS:
+    ALLOWED_HOSTS.append(RENDER_EXTERNAL_HOSTNAME)
+
 if not ALLOWED_HOSTS:
     if DEBUG:
         ALLOWED_HOSTS = ['*']
@@ -166,6 +174,16 @@ MIDDLEWARE = [
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
 ]
+
+if not DEBUG:
+    # On the Docker stack nginx answers /static/ before the request reaches
+    # Django. On a PaaS there is no nginx -- gunicorn is alone in the container
+    # -- so without this the Django admin loads unstyled. WhiteNoise serves what
+    # collectstatic produced, straight from the WSGI app.
+    MIDDLEWARE.insert(
+        MIDDLEWARE.index('django.middleware.security.SecurityMiddleware') + 1,
+        'whitenoise.middleware.WhiteNoiseMiddleware',
+    )
 
 ROOT_URLCONF = 'config.urls'
 
@@ -389,6 +407,13 @@ AVATAR_MAX_BYTES = int(os.getenv('AVATAR_MAX_BYTES', str(5 * 1024 * 1024)))
 # Bearer tokens, keeps working -- a confusing split that only shows up in
 # production.
 CSRF_TRUSTED_ORIGINS = env_list('CSRF_TRUSTED_ORIGINS')
+if RENDER_EXTERNAL_HOSTNAME:
+    # The admin is reached at https://<service>.onrender.com/admin/. Django
+    # rejects the login POST from an origin it does not trust, which fails with
+    # "CSRF verification failed" while the Bearer-token API keeps working.
+    _render_origin = f'https://{RENDER_EXTERNAL_HOSTNAME}'
+    if _render_origin not in CSRF_TRUSTED_ORIGINS:
+        CSRF_TRUSTED_ORIGINS.append(_render_origin)
 
 # Containers log to stdout, so application warnings and errors should appear in
 # `docker compose logs backend` at the level they were emitted, not only when

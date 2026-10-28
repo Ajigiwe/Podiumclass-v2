@@ -1,0 +1,31 @@
+# Client-side routing for the SPA when it is served by Apache.
+#
+# Vue Router runs in history mode, so /classroom/<id> and /attendance are real
+# URLs a teacher copies and shares -- but no such file exists on disk. Without
+# this rule those links return the host's 404 page instead of the app shell.
+#
+# Vite copies everything in public/ into dist/, so this ships with the build.
+# If the host serves the directory with nginx and ignores .htaccess, deep links
+# will 404 and the router must fall back to hash mode instead.
+<IfModule mod_rewrite.c>
+    RewriteEngine On
+    RewriteBase /
+
+    # Real files and directories (index.html, /assets/*) are served as-is.
+    RewriteCond %{REQUEST_FILENAME} -f [OR]
+    RewriteCond %{REQUEST_FILENAME} -d
+    RewriteRule ^ - [L]
+
+    # Everything else is a client-side route.
+    RewriteRule ^ index.html [L]
+</IfModule>
+
+# Hashed asset filenames can be cached forever; the HTML that references them
+# must not be, or a deploy keeps serving links to files that no longer exist.
+<IfModule mod_expires.c>
+    ExpiresActive On
+    ExpiresByType application/javascript "access plus 1 year"
+    ExpiresByType text/css "access plus 1 year"
+    ExpiresByType image/svg+xml "access plus 1 year"
+    ExpiresByType text/html "access plus 0 seconds"
+</IfModule>

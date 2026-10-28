@@ -11,3 +11,7 @@ requests>=2.31.0
 # already had it installed: the production image failed at import time.
 google-auth>=2.30.0
 gunicorn>=22.0.0
+# Serves collectstatic output from Django itself. Needed on hosts where gunicorn
+# is the only process (Render); on the Docker stack nginx answers /static/
+# first, so this never gets a request.
+whitenoise>=6.7.0
