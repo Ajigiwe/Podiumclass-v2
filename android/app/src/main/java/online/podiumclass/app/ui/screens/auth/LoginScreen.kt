@@ -52,22 +52,14 @@ private val GoogleIconVector: ImageVector by lazy {
 
 @Composable
 fun LoginScreen(
-    currentApiUrl: String,
     isLoading: Boolean,
     errorMessage: String? = null,
     onGoogleLogin: () -> Unit,
     onGoogleTokenReceived: (String) -> Unit = {},
-    onSaveApiUrl: (String) -> Unit,
     showWebOAuth: Boolean = false,
     onWebOAuthDismiss: () -> Unit = {}
 ) {
-    var showUrlDialog by remember { mutableStateOf(false) }
     var showOAuthDialog by remember { mutableStateOf(false) }
-    var urlInput by remember { mutableStateOf(currentApiUrl) }
-
-    LaunchedEffect(currentApiUrl) {
-        urlInput = currentApiUrl
-    }
 
     Box(
         modifier = Modifier
@@ -75,21 +67,6 @@ fun LoginScreen(
             .background(Color(0xFF090B11))
             .padding(20.dp)
     ) {
-        // Discrete Settings Gear in top-right corner
-        IconButton(
-            onClick = { showUrlDialog = true },
-            modifier = Modifier
-                .align(Alignment.TopEnd)
-                .padding(top = 8.dp, end = 8.dp)
-        ) {
-            Icon(
-                imageVector = Icons.Default.Settings,
-                contentDescription = "Server Settings",
-                tint = Color(0xFF64748B),
-                modifier = Modifier.size(20.dp)
-            )
-        }
-
         Column(
             horizontalAlignment = Alignment.CenterHorizontally,
             modifier = Modifier
@@ -253,62 +230,6 @@ fun LoginScreen(
             }
         }
 
-        // Server URL Configuration Dialog
-        if (showUrlDialog) {
-            AlertDialog(
-                onDismissRequest = { showUrlDialog = false },
-                title = {
-                    Text(
-                        text = "Configure Server URL",
-                        color = Color.White,
-                        fontSize = 18.sp,
-                        fontWeight = FontWeight.Bold
-                    )
-                },
-                text = {
-                    Column {
-                        Text(
-                            text = "When running on a physical phone, enter your PC's IP address (e.g. http://192.168.1.x:8000).",
-                            color = TextSecondary,
-                            fontSize = 12.sp
-                        )
-                        Spacer(modifier = Modifier.height(12.dp))
-                        OutlinedTextField(
-                            value = urlInput,
-                            onValueChange = { urlInput = it },
-                            label = { Text("Server API Base URL") },
-                            singleLine = true,
-                            colors = OutlinedTextFieldDefaults.colors(
-                                focusedTextColor = Color.White,
-                                unfocusedTextColor = Color.White,
-                                focusedBorderColor = Color(0xFF1845D4),
-                                unfocusedBorderColor = Color.White.copy(alpha = 0.2f)
-                            ),
-                            modifier = Modifier.fillMaxWidth()
-                        )
-                    }
-                },
-                confirmButton = {
-                    Button(
-                        onClick = {
-                            if (urlInput.isNotBlank()) {
-                                onSaveApiUrl(urlInput.trim())
-                            }
-                            showUrlDialog = false
-                        },
-                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1845D4))
-                    ) {
-                        Text("Save & Connect")
-                    }
-                },
-                dismissButton = {
-                    TextButton(onClick = { showUrlDialog = false }) {
-                        Text("Cancel", color = TextSecondary)
-                    }
-                },
-                containerColor = SurfaceDark
-            )
-        }
 
         // In-App Google OAuth Sign-In Web Sheet
         if (showOAuthDialog || showWebOAuth) {

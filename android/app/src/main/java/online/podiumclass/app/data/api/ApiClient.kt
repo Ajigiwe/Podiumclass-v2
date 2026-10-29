@@ -22,6 +22,9 @@ object ApiClient {
         }
 
         val okHttpClient = OkHttpClient.Builder()
+            // First, so a wake-up retry re-runs the whole chain (fresh auth
+            // header included) rather than resending a stale one.
+            .addInterceptor(ColdStartRetryInterceptor())
             .addInterceptor(AuthInterceptor(tokenStorage))
             .addInterceptor(loggingInterceptor)
             .connectTimeout(15, TimeUnit.SECONDS)

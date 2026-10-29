@@ -45,6 +45,34 @@ export const apiClient: AxiosInstance = axios.create({
   timeout: 15000,
 });
 
+// The deployed API scales to zero after a few idle minutes, and the first
+// request afterwards has to wait for a fresh instance to boot -- far longer
+// than the 15s timeout above. That first request therefore always failed with
+// "Network Error" even though the server was healthy and a retry a moment later
+// worked. Retry once with a much longer budget.
+//
+// Only idempotent methods are replayed: with no response received, a lost POST
+// may still have been processed, and sending it twice would create a second
+// class or message. A failed POST surfaces to the user, who retries by hand
+// against the now-warm instance.
+const COLD_START_TIMEOUT_MS = 60000;
+const COLD_START_RETRY_DELAY_MS = 2000;
+const IDEMPOTENT_METHODS = new Set(['get', 'head', 'options']);
+
+const isColdStartFailure = (error: AxiosError): boolean => {
+  // A response means the server was awake and answered; that is not a wake-up.
+  if (error.response) return false;
+  const method = (error.config?.method || 'get').toLowerCase();
+  if (!IDEMPOTENT_METHODS.has(method)) return false;
+  return (
+    error.code === 'ECONNABORTED' ||
+    error.code === 'ERR_NETWORK' ||
+    error.message === 'Network Error'
+  );
+};
+
+const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
 // Request interceptor: attach the user's JWT.
 //
 // The server-to-server attendance key is deliberately NOT sent from the
@@ -65,7 +93,18 @@ apiClient.interceptors.response.use(
     // If response body contains document or documents, return the full data wrapper
     return response;
   },
-  (error: AxiosError<{ error?: DocumentError }>) => {
+  async (error: AxiosError<{ error?: DocumentError }>) => {
+    // One silent retry while the instance boots (see COLD_START_* above).
+    const retried = (error.config as { __coldRetry?: boolean } | undefined)?.__coldRetry;
+    if (!retried && isColdStartFailure(error) && error.config) {
+      await wait(COLD_START_RETRY_DELAY_MS);
+      return apiClient.request({
+        ...error.config,
+        timeout: COLD_START_TIMEOUT_MS,
+        __coldRetry: true,
+      } as Parameters<AxiosInstance['request']>[0]);
+    }
+
     const errorData = error.response?.data?.error;
     const standardizedError: DocumentError = {
       code: errorData?.code || 'UNKNOWN_ERROR',

@@ -37,6 +37,7 @@ fun ProfileScreen(
     onLogout: () -> Unit,
     onNavigateHome: () -> Unit,
     onNavigateAttendance: () -> Unit,
+    onOpenAbout: () -> Unit = {},
     isUploadingPhoto: Boolean = false,
     onUploadPhoto: (bytes: ByteArray, fileName: String, mime: String) -> Unit = { _, _, _ -> }
 ) {
@@ -564,6 +565,67 @@ fun ProfileScreen(
                                     }
                                 }
                             }
+                        }
+                    }
+                }
+            }
+
+            // About: version, contact and the web link.
+            item {
+                Card(
+                    shape = RoundedCornerShape(16.dp),
+                    colors = CardDefaults.cardColors(containerColor = colors.surface),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .border(1.dp, colors.cardBorder, RoundedCornerShape(16.dp))
+                ) {
+                    Column(
+                        modifier = Modifier.padding(18.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Text(
+                            text = "ABOUT",
+                            color = colors.textSecondary,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            letterSpacing = 1.sp
+                        )
+
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(10.dp))
+                                .clickable { onOpenAbout() }
+                                .padding(vertical = 10.dp)
+                        ) {
+                            Icon(
+                                Icons.Default.Info,
+                                contentDescription = null,
+                                tint = colors.primary,
+                                modifier = Modifier.size(18.dp)
+                            )
+                            Spacer(modifier = Modifier.width(10.dp))
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = "About Podium",
+                                    color = colors.textPrimary,
+                                    fontSize = 13.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                                Text(
+                                    text = "Version, contact and the web app",
+                                    color = colors.textSecondary,
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Medium
+                                )
+                            }
+                            Icon(
+                                Icons.Default.ChevronRight,
+                                contentDescription = null,
+                                tint = colors.textTertiary,
+                                modifier = Modifier.size(18.dp)
+                            )
                         }
                     }
                 }

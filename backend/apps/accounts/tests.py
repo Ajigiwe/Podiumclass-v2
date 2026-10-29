@@ -362,3 +362,104 @@ class ProfilePhotoTests(TestCase):
         self.assertEqual(
             self.client.get("/api/v1/accounts/avatar/usr_does_not_exist/").status_code, 404
         )
+
+
+class DisabledAccountTests(TestCase):
+    """
+    Disabling an account in the admin panel must actually keep it out.
+
+    The panel was writing the right field, but the sign-in endpoint still minted
+    a token for a disabled user: they could sign in, then every request failed
+    with ACCOUNT_DISABLED. From the admin's side that looks like the switch did
+    nothing, so both halves are pinned here.
+    """
+
+    def setUp(self):
+        self.client = APIClient()
+        self.student = User.objects.create(
+            id="usr_disabled_1",
+            email="blocked@podium.test",
+            full_name="Blocked Student",
+            role="student",
+            is_verified=True,
+        )
+
+    def _admin(self):
+        return User.objects.create(
+            id="usr_admin_9",
+            email="operator@podium.test",
+            full_name="Operator",
+            role="admin",
+            is_staff=True,
+            is_superuser=True,
+            is_verified=True,
+        )
+
+    def _disable(self):
+        self.student.status = "disabled"
+        self.student.is_active = False
+        self.student.save(update_fields=["status", "is_active"])
+
+    def test_existing_token_stops_working_when_disabled(self):
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {issue_token(self.student)}")
+        self.assertEqual(self.client.get("/api/v1/accounts/me/").status_code, 200)
+
+        self._disable()
+
+        res = self.client.get("/api/v1/accounts/me/")
+        self.assertEqual(res.status_code, 401)
+        self.assertEqual(res.json()["error"]["code"], "ACCOUNT_DISABLED")
+
+    def test_admin_patch_sets_status_and_is_active(self):
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {issue_token(self._admin())}")
+        res = self.client.patch(
+            f"/api/v1/accounts/users/{self.student.id}/",
+            {"status": "disabled"},
+            format="json",
+        )
+        self.assertEqual(res.status_code, 200, res.content)
+        self.student.refresh_from_db()
+        self.assertEqual(self.student.status, "disabled")
+        self.assertFalse(self.student.is_active)
+
+    def test_google_sign_in_refuses_a_disabled_account(self):
+        from unittest.mock import patch
+
+        self._disable()
+
+        with patch("apps.accounts.views.id_token.verify_oauth2_token") as verify:
+            verify.return_value = {
+                "email": self.student.email,
+                "email_verified": True,
+                "name": "Blocked Student",
+                "picture": None,
+            }
+            res = self.client.post(
+                "/api/v1/accounts/google/",
+                {"credential": "fake-google-id-token"},
+                format="json",
+            )
+
+        self.assertEqual(res.status_code, 403, res.content)
+        self.assertEqual(res.json()["error"]["code"], "ACCOUNT_DISABLED")
+        self.assertNotIn("token", res.json())
+
+    def test_active_account_signs_in(self):
+        from unittest.mock import patch
+
+        with patch("apps.accounts.views.id_token.verify_oauth2_token") as verify:
+            verify.return_value = {
+                "email": self.student.email,
+                "email_verified": True,
+                "name": "Blocked Student",
+                "picture": None,
+            }
+            res = self.client.post(
+                "/api/v1/accounts/google/",
+                {"credential": "fake-google-id-token"},
+                format="json",
+            )
+
+        self.assertEqual(res.status_code, 200, res.content)
+        # Every 2xx body is wrapped in the Document Object by the renderer.
+        self.assertTrue(res.json()["document"]["token"])

@@ -349,6 +349,26 @@ class GoogleAuthView(APIView):
             }
         )
 
+        # A disabled account must not be able to obtain a credential. Google
+        # will happily authenticate them again, and this endpoint used to mint a
+        # token for any verified email without looking at the account: the token
+        # was then refused by every API call, so the app looked like it kept
+        # "letting them in" while doing nothing -- and the admin who disabled
+        # them reasonably concluded the switch did not work.
+        if not user.is_active or user.status == "disabled":
+            return Response(
+                {
+                    "error": {
+                        "code": "ACCOUNT_DISABLED",
+                        "message": (
+                            "This account has been disabled. Contact your administrator "
+                            "if you think that is a mistake."
+                        ),
+                    }
+                },
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
         if not created and is_admin and user.role != "admin":
             user.role = "admin"
             user.is_staff = True

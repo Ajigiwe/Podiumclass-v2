@@ -6,6 +6,7 @@ from rest_framework.views import APIView
 
 from apps.accounts.permissions import IsAdmin
 from . import features
+from .livekit_url import normalize_livekit_url
 from .models import SystemSetting
 from .registry import (
     SETTING_GROUPS,
@@ -102,7 +103,28 @@ class SettingDetailView(APIView):
                 status=status.HTTP_404_NOT_FOUND,
             )
 
-        serializer = SettingWriteSerializer(data=request.data, context={"spec": spec})
+        payload = request.data
+        if key == "livekit_url":
+            # Normalise BEFORE validation so a bare hostname copied from the
+            # LiveKit dashboard (which shows it without a scheme) is accepted,
+            # and a placeholder is refused here rather than breaking every join
+            # later. The client is told which form to use.
+            normalized = normalize_livekit_url(request.data.get("value"))
+            if not normalized:
+                return Response(
+                    {
+                        "code": "INVALID_SETTING",
+                        "message": (
+                            "Enter the LiveKit endpoint clients can reach, for example "
+                            "wss://your-project.livekit.cloud. A blank or placeholder value "
+                            "would make every class join fail."
+                        ),
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            payload = {"value": normalized}
+
+        serializer = SettingWriteSerializer(data=payload, context={"spec": spec})
         serializer.is_valid(raise_exception=True)
         new_value = serializer.validated_data["value"]
 

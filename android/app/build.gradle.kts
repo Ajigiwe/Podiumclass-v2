@@ -1,9 +1,35 @@
+import java.util.Properties
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
     alias(libs.plugins.kotlin.compose)
     alias(libs.plugins.kotlin.serialization)
 }
+
+//
+// Release signing.
+//
+// The certificate is the app's identity: Android refuses to update an installed
+// app with an APK signed by a different key, so this keystore has to outlive
+// every build machine and CI runner. It therefore lives outside version control
+// (android/keystore.properties is git-ignored) and is read here only if present:
+// a fresh clone, or a machine that never had it, still builds debug APKs, while
+// releasing there fails to produce a *signed* artifact rather than silently
+// shipping one signed with a throwaway debug key.
+//
+// Generate it once with:
+//   keytool -genkeypair -v -keystore android/keystore/podium-release.jks \
+//     -alias podium -keyalg RSA -keysize 2048 -validity 10000
+//
+val keystorePropertiesFile = rootProject.file("keystore.properties")
+val keystoreProperties = Properties().apply {
+    if (keystorePropertiesFile.exists()) {
+        keystorePropertiesFile.inputStream().use { load(it) }
+    }
+}
+val hasReleaseSigning = keystorePropertiesFile.exists() &&
+    keystoreProperties.getProperty("storeFile").isNullOrBlank().not()
 
 android {
     namespace = "online.podiumclass.app"
@@ -21,17 +47,41 @@ android {
             useSupportLibrary = true
         }
 
-        // The server the app talks to on a fresh install. Production by
-        // default, so a release build is usable without touching a setting;
-        // local development overrides it on the command line:
+        // The one server this build talks to. There is no in-app server field:
+        // the address is fixed at build time so a phone can never be left
+        // pointing at a dead host by a typo or a stale setting. This is the
+        // same API the web client uses (see VITE_API_URL in
+        // deploy/publish_frontend.py).
+        //
+        // Local development overrides it on the command line, which is the only
+        // supported way to change it:
         //   ./gradlew assembleDebug -PpodiumApiUrl=http://192.168.1.10:8000
         val podiumApiUrl = (project.findProperty("podiumApiUrl") as String?)
-            ?: "https://podiumclass.online"
+            ?: "https://podium-api-r6sz.onrender.com"
         buildConfigField("String", "DEFAULT_API_URL", "\"$podiumApiUrl\"")
+    }
+
+    signingConfigs {
+        if (hasReleaseSigning) {
+            create("release") {
+                // Paths in keystore.properties are relative to android/.
+                storeFile = rootProject.file(keystoreProperties.getProperty("storeFile"))
+                storePassword = keystoreProperties.getProperty("storePassword")
+                keyAlias = keystoreProperties.getProperty("keyAlias")
+                keyPassword = keystoreProperties.getProperty("keyPassword")
+            }
+        }
     }
 
     buildTypes {
         release {
+            // No R8: shrinking is off, so the APK is larger but nothing needs
+            // keep rules. Sign only when the keystore is available; otherwise
+            // Gradle emits an unsigned APK, which cannot be installed -- a
+            // visible failure instead of a debug-signed "release".
+            if (hasReleaseSigning) {
+                signingConfig = signingConfigs.getByName("release")
+            }
             isMinifyEnabled = false
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),

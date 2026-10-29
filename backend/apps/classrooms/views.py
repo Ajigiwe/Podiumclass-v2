@@ -9,6 +9,7 @@ from rest_framework.response import Response
 from apps.accounts.permissions import IsLecturerOrAdmin, is_lecturer
 from apps.accounts.models import User
 from apps.core.guards import require_feature
+from apps.core.livekit_url import livekit_credentials_ready, resolve_livekit_url
 from apps.core.models import SystemSetting
 from .access import can_moderate, is_cohost, is_session_authority
 from .models import (
@@ -489,6 +490,27 @@ class LiveKitTokenView(APIView):
                     fields.append("started_at")
                 session.save(update_fields=fields)
 
+        # Resolve the endpoint BEFORE minting a token. A missing, placeholder or
+        # loopback-only URL used to be handed to the client verbatim, which failed
+        # there as "expected url scheme 'https' but no scheme was found for
+        # pending" -- a message no student can act on. It is a server
+        # configuration problem, so it is reported as one, here, with the fix.
+        livekit_url = resolve_livekit_url(request)
+        if not livekit_url or not livekit_credentials_ready():
+            return Response(
+                {
+                    "error": {
+                        "code": "LIVEKIT_NOT_CONFIGURED",
+                        "message": (
+                            "Live video is not configured on this server yet. An administrator "
+                            "needs to set the LiveKit server URL (wss://your-project.livekit.cloud) "
+                            "and its API key and secret in Admin -> Settings -> Realtime Classrooms."
+                        ),
+                    }
+                },
+                status=status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
+
         token, identity = generate_livekit_token(
             room_name=room_name,
             participant_name=participant_name,
@@ -502,7 +524,7 @@ class LiveKitTokenView(APIView):
             "token": token,
             "roomName": room_name,
             "identity": identity,
-            "livekitUrl": SystemSetting.get_setting("livekit_url", getattr(settings, "LIVEKIT_URL", "ws://localhost:7880")),
+            "livekitUrl": livekit_url,
         })
 
 #: The board a class can hold. The client caps itself at 1200 strokes as well;

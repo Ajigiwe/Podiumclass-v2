@@ -237,3 +237,129 @@ class DevLoginFlagExposureTests(TestCase):
     def test_features_endpoint_reports_dev_login_when_enabled(self):
         res = self.client.get("/api/v1/core/features/")
         self.assertIs(res.json()["document"]["devLogin"], True)
+
+
+class LiveKitUrlResolutionTests(TestCase):
+    """
+    Every join answer carries a LiveKit endpoint, and the clients turn a bad one
+    into \"expected url scheme 'https' but no scheme was found for pending\".
+    These pin the four ways it went wrong.
+    """
+
+    def _request(self, host="podium.example.org", secure=False):
+        from django.test import RequestFactory
+
+        factory = RequestFactory()
+        request = factory.get("/api/v1/classrooms/token/")
+        if secure:
+            request = factory.get("/api/v1/classrooms/token/", secure=True)
+        request.META["HTTP_HOST"] = host
+        request.META["SERVER_NAME"] = host.split(":")[0]
+        return request
+
+    def test_placeholder_is_not_an_endpoint(self):
+        from apps.core.livekit_url import normalize_livekit_url
+
+        for value in ("pending", " Pending ", "TBD", "", None, "n/a"):
+            self.assertEqual(normalize_livekit_url(value), "", f"{value!r} must be unusable")
+
+    def test_bare_hostname_gets_wss(self):
+        from apps.core.livekit_url import normalize_livekit_url
+
+        self.assertEqual(
+            normalize_livekit_url("myproject.livekit.cloud"),
+            "wss://myproject.livekit.cloud",
+        )
+
+    def test_plaintext_schemes_are_upgraded_for_a_public_host(self):
+        from apps.core.livekit_url import normalize_livekit_url
+
+        self.assertEqual(
+            normalize_livekit_url("http://livekit.example.org:7880"),
+            "https://livekit.example.org:7880",
+        )
+        self.assertEqual(
+            normalize_livekit_url("ws://livekit.example.org:7880"),
+            "wss://livekit.example.org:7880",
+        )
+
+    def test_loopback_is_kept_for_a_loopback_request(self):
+        from apps.core.livekit_url import normalize_livekit_url
+
+        self.assertEqual(
+            normalize_livekit_url("ws://localhost:7880", request=self._request("localhost:8000")),
+            "ws://localhost:7880",
+        )
+
+    def test_loopback_is_rewritten_to_the_host_the_client_reached(self):
+        # A deployed server left on the development default: \"localhost\" would
+        # resolve to the student's own phone.
+        from apps.core.livekit_url import normalize_livekit_url
+
+        self.assertEqual(
+            normalize_livekit_url(
+                "ws://localhost:7880",
+                request=self._request("192.168.1.20:8000"),
+            ),
+            "ws://192.168.1.20:7880",
+        )
+
+    @override_settings(LIVEKIT_URL="wss://env.livekit.cloud")
+    def test_a_stored_placeholder_does_not_hide_the_environment_value(self):
+        from apps.core.livekit_url import resolve_livekit_url
+
+        SystemSetting.objects.update_or_create(key="livekit_url", defaults={"value": "pending"})
+        self.assertEqual(resolve_livekit_url(self._request()), "wss://env.livekit.cloud")
+
+    def test_saving_a_placeholder_is_refused(self):
+        from apps.core.views import AdminSettingsView  # noqa: F401  (route wiring check)
+
+        admin = User.objects.create(
+            id="usr_core_admin_lk", email="lk-admin@podium.test",
+            full_name="LiveKit Admin", role="admin", is_staff=True,
+        )
+        client = APIClient()
+        client.credentials(HTTP_AUTHORIZATION=f"Bearer {issue_token(admin)}")
+        res = client.patch(
+            "/api/v1/core/settings/livekit_url/", {"value": "pending"}, format="json"
+        )
+        self.assertEqual(res.status_code, 400, res.content)
+        self.assertEqual(res.json()["error"]["code"], "INVALID_SETTING")
+
+    def test_saving_a_bare_hostname_stores_a_usable_url(self):
+        admin = User.objects.create(
+            id="usr_core_admin_lk2", email="lk-admin2@podium.test",
+            full_name="LiveKit Admin", role="admin", is_staff=True,
+        )
+        client = APIClient()
+        client.credentials(HTTP_AUTHORIZATION=f"Bearer {issue_token(admin)}")
+        res = client.patch(
+            "/api/v1/core/settings/livekit_url/",
+            {"value": "myproject.livekit.cloud"},
+            format="json",
+        )
+        self.assertEqual(res.status_code, 200, res.content)
+        self.assertEqual(
+            SystemSetting.objects.get(key="livekit_url").value,
+            "wss://myproject.livekit.cloud",
+        )
+
+    @override_settings(
+        LIVEKIT_URL="wss://demo.livekit.cloud",
+        LIVEKIT_API_KEY="dev-only-livekit-key",
+        LIVEKIT_API_SECRET="dev-only-livekit-secret",
+    )
+    def test_placeholder_keys_are_reported_as_not_configured(self):
+        # A placeholder key signs a token LiveKit will refuse, so the join must
+        # fail here with the setting named rather than during the handshake.
+        lecturer = User.objects.create(
+            id="usr_core_lk_lect", email="lk-lect@podium.test",
+            full_name="Lecturer", role="lecturer",
+        )
+        client = APIClient()
+        client.credentials(HTTP_AUTHORIZATION=f"Bearer {issue_token(lecturer)}")
+        res = client.post(
+            "/api/v1/classrooms/token/", {"roomName": "room-lk"}, format="json"
+        )
+        self.assertEqual(res.status_code, 503, res.content)
+        self.assertEqual(res.json()["error"]["code"], "LIVEKIT_NOT_CONFIGURED")

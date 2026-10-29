@@ -24,6 +24,10 @@ services:
   - type: web
     name: podium-api
     runtime: python
+    # A free instance sleeps after ~15 minutes idle and takes 30-60s to wake.
+    # Both clients retry a cold connection once (ColdStartRetryInterceptor on
+    # Android, client.ts on the web) so the first request of the day is slow
+    # rather than "server unreachable".
     plan: free
     region: frankfurt
     # The Django project lives in backend/, not at the repository root.
@@ -80,6 +84,11 @@ services:
       # LiveKit Cloud: the project's URL, key and secret. Room tokens are signed
       # with this pair, so a wrong value makes every join fail with an
       # unhelpful "invalid token".
+      #
+      # LIVEKIT_URL must be a real endpoint -- wss://<project>.livekit.cloud --
+      # not a placeholder. A value like "pending" is rejected at join time with
+      # LIVEKIT_NOT_CONFIGURED naming this setting, instead of being handed to
+      # the client and failing there as "no scheme was found for pending".
       - key: LIVEKIT_URL
         sync: false
       - key: LIVEKIT_API_KEY

@@ -516,18 +516,15 @@ class ClassroomViewModel(
             // 4. Fetch LiveKit Token & Connect
             val tokenRes = client.getLiveKitToken(sessionId)
             val tokenData = tokenRes.document
-            // The backend advertises its own LiveKit host, which by default is
-            // ws://localhost:7880. On a device or emulator "localhost" is the
-            // device itself, so a loopback host must be rewritten to the machine
-            // running the backend: the configured API host, or 10.0.2.2 (the
-            // emulator's alias for the host) when no usable host is configured.
-            val currentApiUrl = tokenStorage.getApiUrl()
-            val apiHost = try { java.net.URI(currentApiUrl).host } catch (e: Exception) { null }
-            val livekitHost = apiHost?.takeIf { it != "localhost" && it != "127.0.0.1" } ?: "10.0.2.2"
-            val advertisedUrl = tokenData.livekitUrl ?: "ws://$livekitHost:7880"
-            val livekitUrl = advertisedUrl
-                .replace("localhost", livekitHost)
-                .replace("127.0.0.1", livekitHost)
+            // The server resolves and normalises this endpoint itself (it knows
+            // the host the request arrived on, so a development loopback URL has
+            // already been rewritten for this device). Take it verbatim: the old
+            // text substitution here also rewrote the host of a real LiveKit
+            // Cloud URL whenever a path happened to contain "localhost".
+            val livekitUrl = tokenData.livekitUrl?.takeIf { it.isNotBlank() }
+                ?: throw IllegalStateException(
+                    "This class has no live video endpoint configured. Ask your administrator to set it."
+                )
 
             val localName = tokenStorage.getUserName() ?: "Mobile User"
             roomManager.connect(
@@ -575,7 +572,14 @@ class ClassroomViewModel(
             if (waiting) startWaitingForHost()
         } catch (e: Exception) {
             e.printStackTrace()
-            joinBlocked.value = "Could not join the class: ${e.localizedMessage ?: "connection failed"}"
+            val raw = e.localizedMessage ?: ""
+            joinBlocked.value = if (raw.contains("url scheme", ignoreCase = true)) {
+                // The SDK's own words for a malformed server address are useless
+                // to a student; the address comes from the server's settings.
+                "This class has no valid live video endpoint configured. Ask your administrator to check the LiveKit server URL in the admin settings."
+            } else {
+                "Could not join the class: ${raw.ifBlank { "connection failed" }}"
+            }
         } finally {
             _isLoading.value = false
         }

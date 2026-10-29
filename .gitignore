@@ -73,6 +73,15 @@ android/local.properties
 android/build/
 android/app/build/
 
+# Release signing material. Never commit these: the keystore is the app's
+# identity (an installed app can only be updated by the same key), and the
+# properties file holds its passwords. Back the keystore up somewhere durable
+# before shipping anything users will install.
+android/keystore/
+android/keystore.properties
+*.jks
+*.keystore
+
 # --- OS / editors -----------------------------------------------------------
 .DS_Store
 Thumbs.db

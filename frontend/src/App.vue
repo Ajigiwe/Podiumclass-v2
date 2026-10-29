@@ -196,7 +196,14 @@ const mobileMenuOpen = ref(false);
 const isDark = ref(false);
 
 const isStandalonePage = computed(() => {
-  return route.path === '/login' || route.path.startsWith('/classroom');
+  // The landing page and login render without the sidebar; the classroom takes
+  // the whole viewport.
+  return (
+    route.path === '/login' ||
+    route.path === '/welcome' ||
+    route.path === '/about' ||
+    route.path.startsWith('/classroom')
+  );
 });
 
 function toggleTheme() {

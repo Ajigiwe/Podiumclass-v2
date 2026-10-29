@@ -1045,13 +1045,16 @@ export const useClassroomStore = defineStore('classroom', () => {
         throw new Error('No LiveKit token issued by the server.');
       }
 
-      let livekitUrl =
-        tokenDoc.livekitUrl || 'ws://localhost:7880';
-      if (typeof window !== 'undefined' && window.location?.hostname) {
-        const clientHost = window.location.hostname;
-        if (clientHost && clientHost !== 'localhost' && clientHost !== '127.0.0.1') {
-          livekitUrl = livekitUrl.replace('localhost', clientHost).replace('127.0.0.1', clientHost);
-        }
+      // The server resolves this endpoint itself: it normalises the scheme,
+      // upgrades a plaintext address on a TLS page, and rewrites a development
+      // loopback host to the address this page actually reached. Rewriting again
+      // here double-applied that (and mangled any cloud host containing
+      // "localhost").
+      const livekitUrl = tokenDoc.livekitUrl;
+      if (!livekitUrl) {
+        throw new Error(
+          'This class has no live video endpoint configured. Ask your administrator to set the LiveKit server URL in the admin settings.'
+        );
       }
 
       // 2. Create room.
@@ -1090,9 +1093,13 @@ export const useClassroomStore = defineStore('classroom', () => {
       hasFailed.value = true;
       connectionState.value = 'failed';
       joinErrorCode.value = e?.code || null;
-      errorMessage.value =
-        e?.message ||
-        'Could not connect to the LiveKit server. Check your connection and try again.';
+      // "expected url scheme 'https' but no scheme was found for pending" is the
+      // SDK complaining about a server-side setting, not about the student's
+      // connection. Say what it actually means.
+      const raw = String(e?.message || '');
+      errorMessage.value = /url scheme|invalid url/i.test(raw)
+        ? 'This class has no valid live video endpoint configured. Ask your administrator to check the LiveKit server URL.'
+        : raw || 'Could not connect to the LiveKit server. Check your connection and try again.';
       return null;
     } finally {
       isConnecting.value = false;

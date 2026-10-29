@@ -676,6 +676,7 @@ import { useAuthStore } from '../stores/auth';
 import { useFeaturesStore } from '../stores/features';
 import { toast, errorText } from '../stores/toast';
 import { copyWithToast } from '../lib/clipboard';
+import { classroomInviteLink } from '../lib/links';
 import { captureEvent } from '../lib/analytics';
 
 const router = useRouter();
@@ -798,7 +799,7 @@ async function createSession() {
 
 /** Absolute invite link for a class -- what a host pastes into a chat. */
 function classroomLink(session: any): string {
-  return `${window.location.origin}/classroom/${session.id}`;
+  return classroomInviteLink(router, session.id);
 }
 
 /** Copy and report it in a toast, on every copy path in this view. */
@@ -955,7 +956,11 @@ async function joinByCode() {
 function extractSessionFromLink(value: string): string | null {
   try {
     const url = new URL(value, window.location.origin);
-    const match = url.pathname.match(/\/classroom\/([^/?#]+)/);
+    // Invite links carry the classroom in the hash (`/#/classroom/<id>`) under
+    // hash history, and in the path (`/classroom/<id>`) under web history.
+    // Searching both means a link copied before or after a routing change, or
+    // pasted from the Android share sheet, still resolves.
+    const match = `${url.pathname}${url.hash}`.match(/\/classroom\/([^/?#&]+)/);
     if (match) return decodeURIComponent(match[1]);
   } catch {
     /* not a URL */

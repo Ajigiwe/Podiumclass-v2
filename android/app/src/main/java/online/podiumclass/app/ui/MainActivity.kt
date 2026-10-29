@@ -50,6 +50,7 @@ import online.podiumclass.app.data.api.models.StudentAttendanceRecordDto
 import online.podiumclass.app.data.api.models.UpdateProfileRequest
 import online.podiumclass.app.data.api.models.UserDto
 import online.podiumclass.app.data.storage.TokenStorage
+import online.podiumclass.app.ui.screens.about.AboutScreen
 import online.podiumclass.app.ui.screens.admin.AdminScreen
 import online.podiumclass.app.ui.screens.attendance.AttendanceScreen
 import online.podiumclass.app.ui.screens.attendance.HostAttendanceScreen
@@ -376,7 +377,7 @@ class MainActivity : ComponentActivity() {
                                 } catch (e: Exception) {
                                     val rawMsg = e.localizedMessage ?: e.message ?: ""
                                     authError = if (rawMsg.contains("10.0.2.2") || rawMsg.contains("failed to connect") || rawMsg.contains("timeout", ignoreCase = true)) {
-                                        "Cannot reach backend server at $apiUrl. Physical phones cannot use 10.0.2.2 — tap ⚙️ at top right to enter your PC's IP address (e.g. http://192.168.x.x:8000)."
+                                        "Cannot reach the Podium server at $apiUrl. It may still be starting up — give it a moment and try again, or check your internet connection."
                                     } else {
                                         rawMsg
                                     }
@@ -386,7 +387,6 @@ class MainActivity : ComponentActivity() {
                             }
 
                             LoginScreen(
-                                currentApiUrl = apiUrl,
                                 isLoading = isAuthLoading,
                                 errorMessage = authError,
                                 showWebOAuth = showWebOAuthDialog,
@@ -415,12 +415,6 @@ class MainActivity : ComponentActivity() {
                                 onGoogleTokenReceived = { accessToken ->
                                     scope.launch {
                                         executeLogin(GoogleLoginRequest(access_token = accessToken))
-                                    }
-                                },
-                                onSaveApiUrl = { newUrl ->
-                                    scope.launch {
-                                        tokenStorage.setApiUrl(newUrl)
-                                        authError = null
                                     }
                                 }
                             )
@@ -652,6 +646,11 @@ class MainActivity : ComponentActivity() {
                                         popUpTo("dashboard")
                                     }
                                 },
+                                onOpenAbout = {
+                                    navController.navigate("about") {
+                                        popUpTo("dashboard")
+                                    }
+                                },
                                 isUploadingPhoto = isUploadingPhoto,
                                 onUploadPhoto = { bytes, fileName, mime ->
                                     scope.launch {
@@ -679,6 +678,16 @@ class MainActivity : ComponentActivity() {
                                         }
                                     }
                                 }
+                            )
+                        }
+
+                        composable("about") {
+                            isInClassroom = false
+                            AboutScreen(
+                                // Read from the build, so the number on screen is
+                                // always the version actually installed.
+                                versionName = BuildConfig.VERSION_NAME,
+                                onBack = { navController.popBackStack() }
                             )
                         }
 

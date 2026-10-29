@@ -8,6 +8,7 @@ import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
 
 private val Context.dataStore by preferencesDataStore(name = "podium_prefs")
@@ -19,7 +20,6 @@ class TokenStorage(private val context: Context) {
         private val KEY_USER_NAME = stringPreferencesKey("user_name")
         private val KEY_USER_ROLE = stringPreferencesKey("user_role")
         private val KEY_USER_EMAIL = stringPreferencesKey("user_email")
-        private val KEY_API_URL = stringPreferencesKey("api_url")
         private val KEY_THEME_MODE = stringPreferencesKey("theme_mode")
 
         // The intro is a first-run experience: once dismissed it never comes
@@ -27,50 +27,16 @@ class TokenStorage(private val context: Context) {
         private val KEY_ONBOARDED = booleanPreferencesKey("onboarding_seen")
 
         /**
-         * Where this backend is served when nothing usable is configured.
+         * The server this build talks to.
          *
-         * Comes from the build (see `podiumApiUrl` in build.gradle.kts), so the
-         * release APK points at the deployed server while a local build can
-         * still target a machine on the LAN. It used to be a hardcoded LAN IP,
-         * which meant every fresh install shipped pointing at whatever network
-         * that address belonged to on the developer's desk.
+         * Comes from the build (see `podiumApiUrl` in build.gradle.kts) and is
+         * the only source of truth: the app has no server field any more, so
+         * there is nothing that can drift out of sync with the deployment or
+         * send a user's phone at a host that no longer exists. Local testing
+         * points the build at a LAN address with `-PpodiumApiUrl=...` instead
+         * of editing a setting on the device.
          */
         private const val DEFAULT_API_URL = BuildConfig.DEFAULT_API_URL
-
-        /** A host this app used to ship with and must never keep using. */
-        private const val SUPERSEDED_API_HOST = "10.208.165.166"
-
-        /** Loopback and private-range hosts: a dev machine, not a deployment. */
-        private val PRIVATE_HOST = Regex(
-            "^(localhost|127\\.0\\.0\\.1|10\\.\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}" +
-                "|192\\.168\\.\\d{1,3}\\.\\d{1,3}" +
-                "|172\\.(1[6-9]|2\\d|3[01])\\.\\d{1,3}\\.\\d{1,3})$"
-        )
-
-        private fun isPrivateHost(url: String): Boolean = runCatching {
-            java.net.URI(url).host?.let { PRIVATE_HOST.matches(it) } ?: false
-        }.getOrDefault(false)
-
-        /**
-         * One resolution rule for the API URL, used by both the flow the UI
-         * observes and the one-shot read used to build clients. When these two
-         * disagreed, a stale host kept serving one screen while every other
-         * screen silently pointed at a dead address.
-         */
-        private fun normalizeApiUrl(saved: String?): String {
-            if (saved.isNullOrBlank() || saved.contains(SUPERSEDED_API_HOST)) {
-                return DEFAULT_API_URL
-            }
-            // A build that targets a deployed server must not keep obeying a
-            // saved LAN address: after an update the phone would dial a network
-            // it is no longer on, and every screen would look broken. Debug
-            // builds keep the saved value, so testing against a local server
-            // still works.
-            if (!BuildConfig.DEBUG && isPrivateHost(saved) && !isPrivateHost(DEFAULT_API_URL)) {
-                return DEFAULT_API_URL
-            }
-            return saved
-        }
     }
 
     val themeModeFlow: Flow<String> = context.dataStore.data.map { prefs ->
@@ -97,9 +63,12 @@ class TokenStorage(private val context: Context) {
         prefs[KEY_USER_EMAIL]
     }
 
-    val apiUrlFlow: Flow<String> = context.dataStore.data.map { prefs ->
-        normalizeApiUrl(prefs[KEY_API_URL])
-    }
+    /**
+     * Constant, not a stored preference. A value that was saved by an older
+     * build (or typed into the removed server dialog) must not survive an
+     * update, because the setting no longer exists to correct it.
+     */
+    val apiUrlFlow: Flow<String> = flowOf(DEFAULT_API_URL)
 
     val onboardedFlow: Flow<Boolean> = context.dataStore.data.map { prefs ->
         prefs[KEY_ONBOARDED] ?: false
@@ -124,12 +93,6 @@ class TokenStorage(private val context: Context) {
     suspend fun markOnboarded() {
         context.dataStore.edit { prefs ->
             prefs[KEY_ONBOARDED] = true
-        }
-    }
-
-    suspend fun setApiUrl(url: String) {
-        context.dataStore.edit { prefs ->
-            prefs[KEY_API_URL] = url
         }
     }
 
@@ -160,7 +123,7 @@ class TokenStorage(private val context: Context) {
     }
 
     suspend fun getApiUrl(): String {
-        return normalizeApiUrl(context.dataStore.data.first()[KEY_API_URL])
+        return DEFAULT_API_URL
     }
 
     suspend fun clear() {

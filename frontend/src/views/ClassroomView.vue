@@ -1984,6 +1984,7 @@ import { useFeaturesStore } from '../stores/features';
 import { api } from '../api/client';
 import { toast, errorText } from '../stores/toast';
 import { copyWithToast } from '../lib/clipboard';
+import { classroomInviteLink } from '../lib/links';
 import { captureEvent } from '../lib/analytics';
 import RoomModeration from '../components/RoomModeration.vue';
 import ClassroomWhiteboard from '../components/ClassroomWhiteboard.vue';
@@ -2456,7 +2457,7 @@ function playVerificationChime() {
 }
 
 const classroomUrl = computed(() => {
-  return `${window.location.origin}/classroom/${sessionId}`;
+  return classroomInviteLink(router, sessionId);
 });
 
 const isLecturer = computed(() => {

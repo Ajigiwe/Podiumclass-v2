@@ -1,13 +1,25 @@
-import { createRouter, createWebHistory, type RouteRecordRaw } from 'vue-router';
+import { createRouter, createWebHashHistory, type RouteRecordRaw } from 'vue-router';
 import { useAuthStore } from '../stores/auth';
 import { useFeaturesStore } from '../stores/features';
 import { capturePageview } from '../lib/analytics';
 
 const routes: RouteRecordRaw[] = [
   {
+    // The public marketing page. Signed-out visitors to `/` land here instead
+    // of on a bare login card; the sign-in button is one click away.
+    path: '/welcome',
+    name: 'Landing',
+    component: () => import('../views/LandingView.vue'),
+  },
+  {
     path: '/',
     name: 'Dashboard',
     component: () => import('../views/DashboardView.vue'),
+  },
+  {
+    path: '/about',
+    name: 'About',
+    component: () => import('../views/AboutView.vue'),
   },
   {
     path: '/login',
@@ -48,7 +60,20 @@ const routes: RouteRecordRaw[] = [
 ];
 
 export const router = createRouter({
-  history: createWebHistory(),
+  // Hash history, deliberately.
+  //
+  // The production host (fPanel, shared with the hosting control panel) owns
+  // the paths it uses for itself: a request to /login is answered with a 302 to
+  // the hosting provider's own sign-in page, and every other unregistered path
+  // (including /classroom/<code>) returns 204 with an empty body. Static
+  // hosting there offers no rewrite-to-index.html, so path-based deep links --
+  // and a plain refresh on any route -- cannot be served at all.
+  //
+  // With hash history the browser only ever requests `/`, and the route lives
+  // after the `#`, which no server sees. Invite links therefore keep working
+  // across refreshes, and they keep working if the app later moves to a host
+  // that does support rewrites.
+  history: createWebHashHistory(),
   routes,
 });
 
@@ -57,16 +82,22 @@ router.afterEach((to) => {
   capturePageview(to.path);
 });
 
-// Routes that require a signed-in user. Everything else (login) is public.
-const PUBLIC_ROUTES = new Set(['/login']);
+// Routes that require a signed-in user. Everything else (landing, login) is public.
+const PUBLIC_ROUTES = new Set(['/login', '/welcome', '/about']);
 
 router.beforeEach(async (to) => {
-  if (PUBLIC_ROUTES.has(to.path)) return true;
+  if (PUBLIC_ROUTES.has(to.path)) {
+    // A signed-in visitor has no use for the marketing page.
+    if (to.path === '/welcome' && useAuthStore().token) return '/';
+    return true;
+  }
 
   const auth = useAuthStore();
 
-  // No token at all -> straight to login preserving redirect target.
+  // No token at all -> the landing page for the root, login (with the intended
+  // destination) for a deep link such as an invite or a classroom URL.
   if (!auth.token) {
+    if (to.path === '/') return '/welcome';
     return `/login?redirect=${encodeURIComponent(to.fullPath)}`;
   }
 
