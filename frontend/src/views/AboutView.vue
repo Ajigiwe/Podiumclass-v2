@@ -59,6 +59,23 @@
         </div>
       </section>
 
+      <section class="panel dev">
+        <img
+          class="dev-photo"
+          src="/developer.jpg"
+          alt="Emmanuel Ajigiwe Aio"
+          width="96"
+          height="96"
+          loading="lazy"
+          decoding="async"
+        />
+        <div class="dev-copy">
+          <span class="kicker">Developer</span>
+          <h2>Emmanuel Ajigiwe Aio</h2>
+          <p class="muted">Designed and built Podium, on the web and on Android.</p>
+        </div>
+      </section>
+
       <section class="panel">
         <h2>Web app</h2>
         <p class="muted">Open Podium in a browser, or install it to your home screen.</p>
@@ -240,6 +257,42 @@ h2 {
   margin: 0 0 14px;
   color: var(--muted);
   font-size: 12.5px;
+}
+
+/* ------------------------------------------------------------------- dev */
+.dev {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+}
+
+.dev-copy {
+  min-width: 0;
+}
+
+.dev-copy .kicker {
+  display: block;
+  margin-bottom: 6px;
+}
+
+.dev-copy h2 {
+  margin: 0;
+}
+
+.dev-copy .muted {
+  margin: 4px 0 0;
+}
+
+.dev-photo {
+  flex: none;
+  width: 88px;
+  height: 88px;
+  border-radius: 50%;
+  object-fit: cover;
+  object-position: 50% 22%;
+  display: block;
+  background: var(--line);
+  box-shadow: 0 0 0 1px var(--line), 0 6px 18px rgba(16, 34, 94, 0.14);
 }
 
 /* ----------------------------------------------------------------- contact */
@@ -433,6 +486,16 @@ h2 {
   .footer-links {
     margin-left: 0;
     width: 100%;
+  }
+
+  .dev {
+    padding: 20px;
+    gap: 14px;
+  }
+
+  .dev-photo {
+    width: 72px;
+    height: 72px;
   }
 }
 </style>

@@ -39,8 +39,12 @@ android {
         applicationId = "online.podiumclass.app"
         minSdk = 26
         targetSdk = 35
-        versionCode = 1
-        versionName = "2.0.0"
+        // Increment both for every build handed to anyone: versionCode is what
+        // Android compares to decide "is this an update", so leaving it still
+        // makes two different APKs indistinguishable on a device and in a
+        // support call. The in-app About screen shows versionName from here.
+        versionCode = 2
+        versionName = "2.1.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {

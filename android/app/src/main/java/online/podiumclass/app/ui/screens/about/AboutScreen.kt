@@ -3,6 +3,7 @@ package online.podiumclass.app.ui.screens.about
 import android.content.ActivityNotFoundException
 import android.content.Intent
 import android.net.Uri
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -17,6 +18,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -37,12 +39,16 @@ import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import online.podiumclass.app.R
 import online.podiumclass.app.ui.components.PodiumMark
 import online.podiumclass.app.ui.theme.AppTheme
 
@@ -52,6 +58,7 @@ private const val WHATSAPP_URL = "https://wa.me/233550599755"
 private const val PHONE_URL = "tel:+233550599755"
 private const val WEB_URL = "https://minatoflash82.ifnotus.space"
 private const val WEB_DISPLAY = "minatoflash82.ifnotus.space"
+private const val DEVELOPER_NAME = "Emmanuel Ajigiwe Aio"
 
 /**
  * About Podium: what the app is, which version is installed, and how to reach
@@ -207,6 +214,59 @@ fun AboutScreen(
                             trailingIcon = Icons.AutoMirrored.Filled.OpenInNew,
                             onClick = { open(WEB_URL) }
                         )
+                    }
+                }
+            }
+
+            item {
+                Spacer(modifier = Modifier.height(16.dp))
+                Card(
+                    shape = RoundedCornerShape(16.dp),
+                    colors = CardDefaults.cardColors(containerColor = colors.surface),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .border(1.dp, colors.cardBorder, RoundedCornerShape(16.dp))
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.padding(18.dp)
+                    ) {
+                        // Kept in drawable-nodpi so the photo is bitmap-identical
+                        // on every density rather than resampled per bucket.
+                        Image(
+                            painter = painterResource(R.drawable.developer),
+                            contentDescription = DEVELOPER_NAME,
+                            contentScale = ContentScale.Crop,
+                            modifier = Modifier
+                                .size(64.dp)
+                                .clip(CircleShape)
+                                .background(colors.surfaceElevated)
+                        )
+                        Spacer(modifier = Modifier.width(14.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "DEVELOPER",
+                                color = colors.textSecondary,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                letterSpacing = 1.sp
+                            )
+                            Spacer(modifier = Modifier.height(6.dp))
+                            Text(
+                                text = DEVELOPER_NAME,
+                                color = colors.textPrimary,
+                                fontSize = 15.sp,
+                                fontWeight = FontWeight.ExtraBold,
+                                letterSpacing = (-0.2).sp
+                            )
+                            Spacer(modifier = Modifier.height(2.dp))
+                            Text(
+                                text = "Designed and built Podium",
+                                color = colors.textSecondary,
+                                fontSize = 11.sp,
+                                lineHeight = 16.sp
+                            )
+                        }
                     }
                 }
             }
