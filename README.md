@@ -126,6 +126,11 @@ python deploy/publish_frontend.py            # build, package, upload, extract, 
 python deploy/publish_frontend.py --dry-run  # build + package only
 ```
 
+A bearer token is the shorter path, and putting it in the git-ignored `.fpanel-token`
+is the safer one — it is read from disk and never echoed, so it does not land in
+shell history or in a session log. `FPANEL_TOKEN` overrides it, and
+`FPANEL_TOKEN_FILE` relocates it.
+
 The script builds with `npm run build`, zips `frontend/dist` with `index.html` at the archive root, uploads it to the account's `tmp/`, extracts it into the document root, removes the archive and then fetches the live site plus the bundle `index.html` references — so a non-zero exit means the deploy did not land. Old content-hashed bundles are left in place so browsers holding a stale `index.html` still find their JS; add `--prune` to clear `assets/` and `css/` first.
 
 The host answers unregistered paths itself — `/login` redirects to the IFNOTUS portal and any other unknown path returns `204` with an empty body, and static hosting there has no rewrite-to-`index.html`. The web app therefore uses **hash history** (`/#/classroom/<code>`): the browser only ever requests `/`, so invite links and refreshes work regardless of what the server does with paths. `classroomInviteLink()` in `src/lib/links.ts` builds those links through the router, so they follow the history mode instead of hard-coding it.

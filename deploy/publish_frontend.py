@@ -29,10 +29,21 @@ Usage
 
 Auth, in order of preference:
 
-    FPANEL_TOKEN     a short-lived bearer token (DevTools -> Application ->
-                     Local Storage -> access_token). Skips the login call.
-    FPANEL_EMAIL     + FPANEL_PASSWORD, exchanged for a token via
-                     POST /api/v1/auth/login.
+    FPANEL_TOKEN       a short-lived bearer token (DevTools -> Application ->
+                       Local Storage -> access_token). Skips the login call.
+    .fpanel-token      the same token in a git-ignored file at the repository
+                       root (override the path with FPANEL_TOKEN_FILE). Prefer
+                       this over the variable: a value exported in a shell ends
+                       up in history and in any transcript of the session,
+                       whereas a file is read and never echoed. Deleting the
+                       file revokes the handoff.
+    FPANEL_EMAIL       + FPANEL_PASSWORD, exchanged for a token via
+                       POST /api/v1/auth/login.
+
+    Tokens live 45 minutes. If the token being used has expired, the script
+    signs in instead when FPANEL_EMAIL/FPANEL_PASSWORD are set, and otherwise
+    says so before building anything. Set the credentials for a deploy you can
+    repeat without hunting for a fresh token each time.
 
 Configuration overrides (all optional):
 
@@ -57,6 +68,7 @@ Exit status is 0 only when every step (and the verification) passed.
 from __future__ import annotations
 
 import argparse
+import base64
 import json
 import os
 import re
@@ -64,6 +76,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -85,6 +98,51 @@ DOCUMENT_ROOT = "."
 
 class DeployError(RuntimeError):
     """Any step that means the deploy did not happen."""
+
+
+#: Default location for a token handed over out-of-band. Git-ignored.
+TOKEN_FILE = REPO_ROOT / ".fpanel-token"
+
+#: A token with less than this left is treated as unusable. Panel tokens live
+#: 45 minutes, so one pasted through a chat window routinely expires between
+#: being copied and being used; uploading with it wastes the whole build.
+EXPIRY_MARGIN = 120
+
+
+def token_from_file() -> str:
+    """Read a token from FPANEL_TOKEN_FILE, or the default .fpanel-token.
+
+    Never logged, never printed: only whether one was found.
+    """
+    path = Path(os.environ.get("FPANEL_TOKEN_FILE", str(TOKEN_FILE)))
+    if not path.is_file():
+        return ""
+    try:
+        value = path.read_text(encoding="utf-8").strip()
+    except OSError as error:
+        raise DeployError(f"Could not read the token file {path}: {error}") from error
+    # A token copied out of DevTools sometimes arrives wrapped in quotes, and a
+    # trailing newline is normal in a file written by an editor.
+    return value.strip().strip("\"'").strip()
+
+
+def token_seconds_left(token: str) -> int | None:
+    """Seconds until the token's ``exp`` claim, or None if it cannot be read.
+
+    Only the unverified payload is decoded: this decides whether to bother
+    calling the API, not whether the token is trustworthy -- the server still
+    validates the signature on every request.
+    """
+    try:
+        payload = token.split(".")[1]
+    except IndexError:
+        return None
+    payload += "=" * (-len(payload) % 4)
+    try:
+        claims = json.loads(base64.urlsafe_b64decode(payload))
+        return int(claims["exp"]) - int(time.time())
+    except (ValueError, KeyError, TypeError):
+        return None
 
 
 def log(message: str) -> None:
@@ -137,18 +195,41 @@ def encode_multipart(field: str, filename: str, content: bytes,
 
 
 def login() -> str:
-    """Return a bearer token from FPANEL_TOKEN, or by signing in."""
-    token = os.environ.get("FPANEL_TOKEN", "").strip()
-    if token:
-        log("Using FPANEL_TOKEN from the environment.")
-        return token
-
+    """Return a bearer token from the environment, the token file, or sign in."""
     email = os.environ.get("FPANEL_EMAIL", "").strip()
     password = os.environ.get("FPANEL_PASSWORD", "")
-    if not email or not password:
+    can_sign_in = bool(email and password)
+
+    stale = ""
+    for source, token in (
+        ("FPANEL_TOKEN", os.environ.get("FPANEL_TOKEN", "").strip()),
+        (f"the token file ({TOKEN_FILE.name})", token_from_file()),
+    ):
+        if not token:
+            continue
+        remaining = token_seconds_left(token)
+        if remaining is None or remaining > EXPIRY_MARGIN:
+            note = f" Valid for {remaining // 60} more min." if remaining is not None else ""
+            log(f"Using a token from {source}.{note}")
+            return token
+        stale = f"The token from {source} expired {abs(remaining) // 60} min ago."
+
+    if stale and not can_sign_in:
         raise DeployError(
-            "No credentials. Set FPANEL_TOKEN, or both FPANEL_EMAIL and "
-            "FPANEL_PASSWORD, in your shell or a local (git-ignored) .env."
+            f"{stale} Panel tokens last 45 minutes. Copy a fresh one into "
+            f"{TOKEN_FILE.name}, or set FPANEL_EMAIL and FPANEL_PASSWORD so "
+            "every deploy mints its own."
+        )
+    if stale:
+        # Credentials are present, so a dead token costs a login call, not the
+        # deploy. Fall through and mint a fresh one.
+        log(f"{stale} Signing in for a fresh one.")
+
+    if not can_sign_in:
+        raise DeployError(
+            "No credentials. Put a panel bearer token in "
+            f"{TOKEN_FILE.name} (or point FPANEL_TOKEN_FILE at it), set "
+            "FPANEL_TOKEN, or set both FPANEL_EMAIL and FPANEL_PASSWORD."
         )
 
     log(f"Signing in as {email}...")
@@ -339,6 +420,11 @@ def main() -> int:
     arguments = parser.parse_args()
 
     try:
+        # Authenticate before building. A token pasted minutes ago may already
+        # be dead, and it is better to say so in a second than after a
+        # minute-long build plus a half-megabyte upload that gets a 401.
+        token = "" if arguments.dry_run else login()
+
         dist = arguments.dist or (FRONTEND_DIR / "dist" if arguments.no_build else build_frontend())
         if not dist.is_dir():
             raise DeployError(f"{dist} is not a directory; run without --no-build first.")
@@ -349,7 +435,6 @@ def main() -> int:
                 log("Dry run: packaged, nothing uploaded.")
                 return 0
 
-            token = login()
             remote_archive = upload(token, archive)
             publish(token, remote_archive, arguments.prune)
 

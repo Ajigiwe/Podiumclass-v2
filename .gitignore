@@ -82,6 +82,12 @@ android/keystore.properties
 *.jks
 *.keystore
 
+# --- Deploy credentials ------------------------------------------------------
+# A fPanel bearer token handed to deploy/publish_frontend.py. Same reasoning as
+# the keystore: it is a live credential, so it is read from disk and never
+# committed. See the script's docstring.
+.fpanel-token
+
 # --- OS / editors -----------------------------------------------------------
 .DS_Store
 Thumbs.db
