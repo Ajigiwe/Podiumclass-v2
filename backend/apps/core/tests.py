@@ -114,15 +114,83 @@ class FeatureFlagApiTests(TestCase):
         self.assertEqual(SystemSetting.get_setting("min_topup_amount"), "250")
 
     def test_blank_secret_write_leaves_existing_value(self):
+        # Any writable secret, not the LiveKit one: that is read-only now (see
+        # the test below) and never reaches this rule.
         SystemSetting.objects.update_or_create(
-            key="livekit_api_secret", defaults={"value": "original-secret"}
+            key="attendance_api_key", defaults={"value": "original-secret"}
         )
         self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {issue_token(self.admin)}")
         res = self.client.patch(
-            "/api/v1/core/settings/livekit_api_secret/", {"value": ""}, format="json"
+            "/api/v1/core/settings/attendance_api_key/", {"value": ""}, format="json"
         )
         self.assertEqual(res.status_code, 200)
-        self.assertEqual(SystemSetting.get_setting("livekit_api_secret"), "original-secret")
+        self.assertEqual(SystemSetting.get_setting("attendance_api_key"), "original-secret")
+
+    def test_livekit_credentials_cannot_be_written_here(self):
+        """
+        Token signing reads LIVEKIT_API_KEY/SECRET from the environment, so the
+        stored rows are display-only. A write used to succeed and change
+        nothing -- someone following the join error set the key here, saw it
+        saved, and every class still refused to start.
+        """
+        SystemSetting.objects.update_or_create(
+            key="livekit_api_key", defaults={"value": "APIfromenv"}
+        )
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {issue_token(self.admin)}")
+        for key in ("livekit_api_key", "livekit_api_secret"):
+            res = self.client.patch(
+                f"/api/v1/core/settings/{key}/", {"value": "typed-in-admin"}, format="json"
+            )
+            self.assertEqual(res.status_code, 409, res.content)
+            self.assertEqual(res.json()["error"]["code"], "READ_ONLY_SETTING")
+        # And the refusal left the stored value alone.
+        self.assertEqual(SystemSetting.get_setting("livekit_api_key"), "APIfromenv")
+
+    @override_settings(LIVEKIT_API_KEY="APIliveenv", LIVEKIT_API_SECRET="live-secret-value")
+    def test_read_only_settings_report_the_environment_not_the_seeded_row(self):
+        """
+        The row is a snapshot from seed time; the environment is what signs
+        tokens. After a rotation the page must show the key in use, not the one
+        left behind in the database.
+        """
+        SystemSetting.objects.update_or_create(
+            key="livekit_api_key", defaults={"value": "APIstale"}
+        )
+        SystemSetting.objects.update_or_create(
+            key="livekit_api_secret", defaults={"value": "stale-secret"}
+        )
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {issue_token(self.admin)}")
+        doc = self.client.get("/api/v1/core/settings/").json()["document"]
+        by_key = {s["key"]: s for s in doc["settings"]}
+
+        self.assertEqual(by_key["livekit_api_key"]["value"], "APIliveenv")
+        self.assertTrue(by_key["livekit_api_key"]["isSet"])
+        # The secret is still masked, but its presence comes from the env too.
+        self.assertIsNone(by_key["livekit_api_secret"]["value"])
+        self.assertTrue(by_key["livekit_api_secret"]["isSet"])
+
+    @override_settings(LIVEKIT_API_KEY="dev-only-livekit-key", LIVEKIT_API_SECRET="dev-only-livekit-secret")
+    def test_placeholder_environment_keys_report_as_not_set(self):
+        # env_secret supplies a "dev-only-" fallback so the process can boot
+        # without the credential; showing that as a configured key would tell an
+        # administrator their LiveKit setup was fine when it cannot work.
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {issue_token(self.admin)}")
+        doc = self.client.get("/api/v1/core/settings/").json()["document"]
+        by_key = {s["key"]: s for s in doc["settings"]}
+
+        self.assertEqual(by_key["livekit_api_key"]["value"], "")
+        self.assertFalse(by_key["livekit_api_key"]["isSet"])
+        self.assertFalse(by_key["livekit_api_secret"]["isSet"])
+
+    def test_settings_payload_flags_read_only_fields(self):
+        # The UI relies on this flag to render the field without an edit control.
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {issue_token(self.admin)}")
+        doc = self.client.get("/api/v1/core/settings/").json()["document"]
+        by_key = {s["key"]: s for s in doc["settings"]}
+        self.assertTrue(by_key["livekit_api_key"]["readOnly"])
+        self.assertTrue(by_key["livekit_api_secret"]["readOnly"])
+        # The URL stays writable: it is the one LiveKit value read from the DB.
+        self.assertFalse(by_key["livekit_url"]["readOnly"])
 
 
 class FeatureEnforcementTests(TestCase):

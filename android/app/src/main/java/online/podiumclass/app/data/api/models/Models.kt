@@ -386,7 +386,11 @@ data class SettingDto(
     val help: String = "",
     val secret: Boolean = false,
     val value: String? = null,
-    val isSet: Boolean = false
+    val isSet: Boolean = false,
+    // Read-only settings (LiveKit API key/secret) come from the server
+    // environment. The admin screen shows them but never offers an edit, and
+    // the API rejects a write, so the UI must not pretend otherwise.
+    val readOnly: Boolean = false
 )
 
 @Serializable

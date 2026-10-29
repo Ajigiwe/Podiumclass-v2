@@ -83,7 +83,8 @@
         <div>
           <h3 class="text-base font-bold text-[#0D0D1A] dark:text-white">Platform Configuration</h3>
           <p class="text-xs text-[#8888A8] mt-0.5">
-            Credentials and limits stored in the system_settings table. Secrets are never returned to the browser.
+            Credentials and limits. Fields marked ENV are set on the server environment and shown here
+            for reference. Secrets are never returned to the browser.
           </p>
         </div>
 
@@ -102,6 +103,7 @@
               <label class="flex items-center gap-1.5 text-[11px] font-bold text-[#8888A8] uppercase tracking-wider">
                 {{ setting.label }}
                 <span v-if="setting.secret" class="text-[8px] px-1 py-0.5 rounded bg-amber-50 dark:bg-amber-900/20 text-amber-600 font-black">SECRET</span>
+                <span v-if="setting.readOnly" class="text-[8px] px-1 py-0.5 rounded bg-slate-100 dark:bg-slate-800 text-slate-500 font-black">ENV</span>
               </label>
 
               <!-- Secret field: masked, blank = leave unchanged -->
@@ -109,9 +111,10 @@
                 v-if="setting.secret"
                 type="password"
                 :value="drafts[setting.key]"
+                :disabled="setting.readOnly"
                 @input="setDraft(setting.key, ($event.target as HTMLInputElement).value)"
                 :placeholder="setting.isSet ? '••••••••  (unchanged if blank)' : 'Not set'"
-                class="w-full px-3 py-2 bg-[#F5F6FA] dark:bg-slate-800 border border-[#DDE0F0] dark:border-slate-700 rounded-lg text-xs font-mono outline-none focus:border-[#1845D4]"
+                class="w-full px-3 py-2 bg-[#F5F6FA] dark:bg-slate-800 border border-[#DDE0F0] dark:border-slate-700 rounded-lg text-xs font-mono outline-none focus:border-[#1845D4] disabled:opacity-60 disabled:cursor-not-allowed"
               />
 
               <!-- Integer field -->
@@ -119,8 +122,9 @@
                 v-else-if="setting.type === 'integer'"
                 type="number"
                 :value="drafts[setting.key]"
+                :disabled="setting.readOnly"
                 @input="setDraft(setting.key, ($event.target as HTMLInputElement).value)"
-                class="w-full px-3 py-2 bg-[#F5F6FA] dark:bg-slate-800 border border-[#DDE0F0] dark:border-slate-700 rounded-lg text-xs font-mono outline-none focus:border-[#1845D4]"
+                class="w-full px-3 py-2 bg-[#F5F6FA] dark:bg-slate-800 border border-[#DDE0F0] dark:border-slate-700 rounded-lg text-xs font-mono outline-none focus:border-[#1845D4] disabled:opacity-60 disabled:cursor-not-allowed"
               />
 
               <!-- Default text/email/url field -->
@@ -128,14 +132,24 @@
                 v-else
                 :type="setting.type === 'email' ? 'email' : setting.type === 'url' ? 'url' : 'text'"
                 :value="drafts[setting.key]"
+                :disabled="setting.readOnly"
                 @input="setDraft(setting.key, ($event.target as HTMLInputElement).value)"
-                class="w-full px-3 py-2 bg-[#F5F6FA] dark:bg-slate-800 border border-[#DDE0F0] dark:border-slate-700 rounded-lg text-xs font-mono outline-none focus:border-[#1845D4]"
+                class="w-full px-3 py-2 bg-[#F5F6FA] dark:bg-slate-800 border border-[#DDE0F0] dark:border-slate-700 rounded-lg text-xs font-mono outline-none focus:border-[#1845D4] disabled:opacity-60 disabled:cursor-not-allowed"
               />
 
               <p v-if="setting.help" class="text-[10px] text-[#8888A8] leading-snug">{{ setting.help }}</p>
 
               <div class="flex items-center gap-2 pt-0.5">
+                <!-- Read-only: nothing to save. The server would refuse it, so
+                     offering a button would only produce a failed request. -->
+                <span
+                  v-if="setting.readOnly"
+                  class="px-2.5 py-1 rounded text-[10px] font-bold uppercase tracking-wider text-[#8888A8] bg-[#F5F6FA] dark:bg-slate-800"
+                >
+                  <i class="fas fa-lock mr-1"></i> Set on the server
+                </span>
                 <button
+                  v-else
                   @click="saveSetting(setting)"
                   :disabled="!isDirty(setting) || busyKeys.has(setting.key)"
                   class="px-2.5 py-1 rounded text-[10px] font-bold uppercase tracking-wider transition-all cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
@@ -166,6 +180,9 @@ interface SettingGroup { key: string; label: string; icon: string; description: 
 interface Setting {
   key: string; group: string; label: string; type: string;
   help: string; secret: boolean; value: string | null; isSet: boolean; updatedAt: string | null;
+  // Set for values the runtime reads only from the environment (LiveKit API
+  // key/secret): displayed for reference, never writable from here.
+  readOnly?: boolean;
 }
 interface FeatureGroup { key: string; label: string; icon: string; description: string }
 interface Feature {
@@ -229,6 +246,7 @@ function setDraft(key: string, value: string) {
 }
 
 function isDirty(setting: Setting): boolean {
+  if (setting.readOnly) return false;
   return drafts[setting.key] !== (setting.value ?? '');
 }
 

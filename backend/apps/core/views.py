@@ -6,7 +6,7 @@ from rest_framework.views import APIView
 
 from apps.accounts.permissions import IsAdmin
 from . import features
-from .livekit_url import normalize_livekit_url
+from .livekit_url import is_usable_credential, normalize_livekit_url
 from .models import SystemSetting
 from .registry import (
     SETTING_GROUPS,
@@ -19,11 +19,26 @@ from .serializers import SettingWriteSerializer
 
 
 def _setting_payload(key: str) -> dict:
-    """Merge registry metadata with the live row for one setting key."""
+    """Merge registry metadata with the current value for one setting key.
+
+    For most settings that is the stored ``SystemSetting`` row. A spec that
+    names an ``env`` variable is different: the runtime reads that variable, not
+    the row, so the row is only whatever ``seed_admin_settings`` copied in on the
+    day the database was created. Reporting it after a key rotation would show a
+    value the server stopped using -- on a field the UI deliberately makes
+    read-only, with no way to correct it by hand.
+    """
     spec = SETTINGS_BY_KEY[key]
     row = SystemSetting.objects.filter(key=key).first()
     is_secret = bool(spec.get("secret"))
     raw = row.value if row else ""
+
+    env_name = spec.get("env")
+    if env_name:
+        live = getattr(settings, env_name, "")
+        # An unset credential is a "dev-only-" placeholder, not a real key, so
+        # report it as not set rather than echoing something that cannot work.
+        raw = str(live).strip() if is_usable_credential(live) else ""
     return {
         "key": key,
         "group": spec["group"],
@@ -35,6 +50,10 @@ def _setting_payload(key: str) -> dict:
         # value is configured so it can render a "configured" state instead.
         "value": None if is_secret else raw,
         "isSet": bool(str(raw).strip()),
+        # A read-only setting is shown for reference only. Both clients render it
+        # without an edit control, and the PATCH below refuses it regardless, so
+        # a hand-written request cannot write one either.
+        "readOnly": bool(spec.get("readOnly")),
         "updatedAt": row.updated_at.isoformat() if row else None,
     }
 
@@ -101,6 +120,22 @@ class SettingDetailView(APIView):
             return Response(
                 {"code": "UNKNOWN_SETTING", "message": f"'{key}' is not a configurable setting."},
                 status=status.HTTP_404_NOT_FOUND,
+            )
+
+        if spec.get("readOnly"):
+            # The value would be written to system_settings and then ignored by
+            # the code that signs LiveKit tokens, which reads the environment.
+            # Accepting it is worse than refusing: it looks like it worked.
+            env = spec.get("env") or key.upper()
+            return Response(
+                {
+                    "code": "READ_ONLY_SETTING",
+                    "message": (
+                        f"'{spec.get('label', key)}' is read-only. Set the {env} "
+                        "environment variable on the server and restart the API."
+                    ),
+                },
+                status=status.HTTP_409_CONFLICT,
             )
 
         payload = request.data

@@ -501,10 +501,16 @@ class LiveKitTokenView(APIView):
                 {
                     "error": {
                         "code": "LIVEKIT_NOT_CONFIGURED",
+                        # The key and secret must name the environment variables:
+                        # they are read only from settings, never from the
+                        # database, so pointing an operator at Admin -> Settings
+                        # for them sent them to a field that changes nothing.
                         "message": (
                             "Live video is not configured on this server yet. An administrator "
-                            "needs to set the LiveKit server URL (wss://your-project.livekit.cloud) "
-                            "and its API key and secret in Admin -> Settings -> Realtime Classrooms."
+                            "needs to set LIVEKIT_API_KEY and LIVEKIT_API_SECRET in the server "
+                            "environment and restart the API, and supply the LiveKit server URL "
+                            "(wss://your-project.livekit.cloud) as LIVEKIT_URL or in "
+                            "Admin -> Settings -> Realtime Classrooms."
                         ),
                     }
                 },

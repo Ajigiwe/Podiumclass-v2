@@ -924,10 +924,12 @@ private fun SettingRow(setting: SettingDto, onClick: () -> Unit) {
     Card(
         shape = RoundedCornerShape(10.dp),
         colors = CardDefaults.cardColors(containerColor = colors.surface),
+        // A read-only row must not be tappable: the API refuses the write, so
+        // opening the editor would only produce an error after the user typed.
         modifier = Modifier
             .fillMaxWidth()
             .border(1.dp, colors.cardBorder, RoundedCornerShape(10.dp))
-            .clickable { onClick() }
+            .then(if (setting.readOnly) Modifier else Modifier.clickable { onClick() })
     ) {
         Row(
             verticalAlignment = Alignment.CenterVertically,
@@ -945,9 +947,15 @@ private fun SettingRow(setting: SettingDto, onClick: () -> Unit) {
                         Spacer(modifier = Modifier.width(6.dp))
                         Pill(text = "SECRET", color = colors.warning)
                     }
+                    if (setting.readOnly) {
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Pill(text = "ENV", color = colors.textSecondary)
+                    }
                 }
                 Text(
                     text = when {
+                        setting.readOnly && setting.secret -> "Set on the server"
+                        setting.readOnly -> setting.value.orEmpty().ifBlank { "Set on the server" }
                         setting.secret && setting.isSet -> "Configured — tap to replace"
                         setting.secret -> "Not set"
                         setting.value.isNullOrBlank() -> "Empty"
@@ -960,7 +968,21 @@ private fun SettingRow(setting: SettingDto, onClick: () -> Unit) {
                     overflow = TextOverflow.Ellipsis
                 )
             }
-            Icon(Icons.Default.Edit, contentDescription = "Edit", tint = colors.textTertiary, modifier = Modifier.size(16.dp))
+            if (setting.readOnly) {
+                Icon(
+                    Icons.Default.Lock,
+                    contentDescription = "Read-only",
+                    tint = colors.textTertiary,
+                    modifier = Modifier.size(14.dp)
+                )
+            } else {
+                Icon(
+                    Icons.Default.Edit,
+                    contentDescription = "Edit",
+                    tint = colors.textTertiary,
+                    modifier = Modifier.size(16.dp)
+                )
+            }
         }
     }
 }

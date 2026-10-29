@@ -49,6 +49,11 @@ SETTING_GROUPS = [
 
 # Input types the settings UI knows how to render.
 #   text | email | url | secret | integer | boolean
+#
+# A spec may also carry ``readOnly``: the setting is displayed for reference but
+# cannot be written through the API, and ``env`` names the environment variable
+# an operator changes instead. Use it for anything the runtime reads only from
+# the environment, so the UI never offers an edit that would do nothing.
 SETTINGS = [
     # -- access -----------------------------------------------------------
     {
@@ -76,6 +81,13 @@ SETTINGS = [
         "help": "OAuth client secret. Never returned to the browser in clear text.",
     },
     # -- realtime ---------------------------------------------------------
+    # Only livekit_url is honoured from the database: resolve_livekit_url()
+    # reads it before falling back to LIVEKIT_URL. The API key and secret are
+    # NOT -- generate_livekit_token() and livekit_credentials_ready() read the
+    # environment directly, because they sign tokens that grant entry to any
+    # room. They are listed here read-only so the page can show which key is in
+    # use; editing them used to look like it worked and silently changed
+    # nothing, which cost real debugging time on failing joins.
     {
         "key": "livekit_url",
         "group": "realtime",
@@ -90,7 +102,9 @@ SETTINGS = [
         "label": "LiveKit API Key",
         "type": "text",
         "secret": False,
-        "help": "Public API key used to identify this project to LiveKit.",
+        "readOnly": True,
+        "env": "LIVEKIT_API_KEY",
+        "help": "Read-only. Set the LIVEKIT_API_KEY environment variable on the server.",
     },
     {
         "key": "livekit_api_secret",
@@ -98,7 +112,12 @@ SETTINGS = [
         "label": "LiveKit API Secret",
         "type": "secret",
         "secret": True,
-        "help": "Signs room tokens. Never returned to the browser in clear text.",
+        "readOnly": True,
+        "env": "LIVEKIT_API_SECRET",
+        "help": (
+            "Read-only. Set the LIVEKIT_API_SECRET environment variable on the "
+            "server; it is never returned to a browser."
+        ),
     },
     # -- integrations -----------------------------------------------------
     {

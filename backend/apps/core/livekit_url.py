@@ -118,6 +118,21 @@ def normalize_livekit_url(raw, request=None) -> str:
     return urlunsplit((scheme, netloc, parts.path.rstrip("/"), "", ""))
 
 
+def is_usable_credential(value) -> bool:
+    """
+    Whether a configured credential is real rather than a placeholder.
+
+    ``env_secret`` falls back to a per-boot ``dev-only-`` value so a deployment
+    can still start without the secret, which means "is it set?" is not the
+    same question as "does it work?". Used both to gate joining and to decide
+    whether the admin page should show a value at all.
+    """
+    cleaned = str(value or "").strip()
+    if not cleaned or cleaned.casefold() in PLACEHOLDERS:
+        return False
+    return not cleaned.startswith("dev-only-")
+
+
 def livekit_credentials_ready() -> bool:
     """
     Whether the API key/secret that sign room tokens are real.
@@ -126,13 +141,10 @@ def livekit_credentials_ready() -> bool:
     the client reports as a generic "could not connect". Checking here lets the
     join answer say which setting is wrong instead.
     """
-    for value in (settings.LIVEKIT_API_KEY, settings.LIVEKIT_API_SECRET):
-        cleaned = str(value or "").strip()
-        if not cleaned or cleaned.casefold() in PLACEHOLDERS:
-            return False
-        if cleaned.startswith("dev-only-"):
-            return False
-    return True
+    return all(
+        is_usable_credential(value)
+        for value in (settings.LIVEKIT_API_KEY, settings.LIVEKIT_API_SECRET)
+    )
 
 
 def resolve_livekit_url(request=None) -> str:
