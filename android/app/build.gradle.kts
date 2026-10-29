@@ -43,8 +43,8 @@ android {
         // Android compares to decide "is this an update", so leaving it still
         // makes two different APKs indistinguishable on a device and in a
         // support call. The in-app About screen shows versionName from here.
-        versionCode = 2
-        versionName = "2.1.0"
+        versionCode = 3
+        versionName = "2.1.1"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {
