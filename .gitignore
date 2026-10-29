@@ -87,6 +87,9 @@ android/keystore.properties
 # the keystore: it is a live credential, so it is read from disk and never
 # committed. See the script's docstring.
 .fpanel-token
+# Panel email/password, sourced by the shell for publish_frontend.py. Same
+# reasoning as the token above: read from disk, never committed.
+.fpanel-creds
 
 # --- OS / editors -----------------------------------------------------------
 .DS_Store

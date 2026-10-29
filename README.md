@@ -117,19 +117,28 @@ See **[DEPLOY_VPS.md](DEPLOY_VPS.md)** for server preparation, DNS, ports, verif
 `minatoflash82.ifnotus.space` is served from the fPanel hosting home, whose document root is owned by `root` — SCP/SFTP and the account terminal cannot write to it. fPanel's File Manager runs with root privileges, so deploys go through its file API:
 
 ```bash
-# Provide credentials once per shell (both are read from the environment and
-# are never written to disk). FPANEL_TOKEN also works and skips the login call.
-export FPANEL_EMAIL="you@example.com"
-export FPANEL_PASSWORD="..."
+# Credentials live in the git-ignored .fpanel-creds at the repository root:
+#     FPANEL_EMAIL="you@example.com"
+#     FPANEL_PASSWORD="..."
+set -a; . ./.fpanel-creds; set +a
 
 python deploy/publish_frontend.py            # build, package, upload, extract, verify
 python deploy/publish_frontend.py --dry-run  # build + package only
 ```
 
-A bearer token is the shorter path, and putting it in the git-ignored `.fpanel-token`
-is the safer one — it is read from disk and never echoed, so it does not land in
-shell history or in a session log. `FPANEL_TOKEN` overrides it, and
-`FPANEL_TOKEN_FILE` relocates it.
+Signing in is the supported path: each run exchanges the credentials for a fresh
+token, so a deploy never depends on a value that has quietly expired. Panel
+bearer tokens last **45 minutes**, which is shorter than the gap between most
+deploys — one that has gone stale fails with `401 authentication_failed` only
+after the build and a half-megabyte upload have been spent on it. The script
+reads the token's `exp` claim before building, so a stale token either triggers a
+login (when credentials are present) or is reported in a second.
+
+A token is still accepted when you would rather not keep a password on disk: put
+it in the git-ignored `.fpanel-token`, set `FPANEL_TOKEN`, or point
+`FPANEL_TOKEN_FILE` elsewhere. It is read from disk and never echoed, so it does
+not land in shell history or in a session log, and deleting the file revokes the
+handoff.
 
 The script builds with `npm run build`, zips `frontend/dist` with `index.html` at the archive root, uploads it to the account's `tmp/`, extracts it into the document root, removes the archive and then fetches the live site plus the bundle `index.html` references — so a non-zero exit means the deploy did not land. Old content-hashed bundles are left in place so browsers holding a stale `index.html` still find their JS; add `--prune` to clear `assets/` and `css/` first.
 
