@@ -244,6 +244,39 @@ def check_feature_flags():
     return Probe(STATUS_PASS, f"{enabled}/{len(flags)} enabled")
 
 
+@health_check("livekit", critical=False)
+def check_livekit():
+    """
+    Advisory: the realtime classroom has an endpoint and real signing keys.
+
+    Reports only WHICH values are missing, never the values themselves -- the
+    names are already in the docs and the deploy blueprint, so naming them is
+    safe and it is the one thing an operator needs. This exists because a
+    missing key does not stop the server from starting (``env_secret`` falls
+    back to a per-boot ``dev-only-`` placeholder), so the first sign of trouble
+    is a student being unable to join a class that has already begun.
+
+    Advisory, not critical: video being unconfigured does not stop the API from
+    serving sign-in, attendance, or recordings, and failing readiness would take
+    a working instance out of service over it.
+    """
+    from django.conf import settings
+
+    from .livekit_url import is_usable_credential, resolve_livekit_url
+
+    missing = []
+    if not resolve_livekit_url():
+        missing.append("LIVEKIT_URL")
+    if not is_usable_credential(getattr(settings, "LIVEKIT_API_KEY", "")):
+        missing.append("LIVEKIT_API_KEY")
+    if not is_usable_credential(getattr(settings, "LIVEKIT_API_SECRET", "")):
+        missing.append("LIVEKIT_API_SECRET")
+
+    if missing:
+        return Probe(STATUS_WARN, "not configured: " + ", ".join(missing))
+    return Probe(STATUS_PASS, "endpoint and signing keys configured")
+
+
 @health_check("user_store", critical=False)
 def check_user_store():
     """Advisory: the user table is reachable and holds an admin account."""
