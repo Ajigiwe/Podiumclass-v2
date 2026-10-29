@@ -112,7 +112,30 @@ sudo bash deploy/deploy.sh
 
 See **[DEPLOY_VPS.md](DEPLOY_VPS.md)** for server preparation, DNS, ports, verification, updates, backups and troubleshooting. The development `docker-compose.yml` is unchanged and is not used on the server.
 
-### 5. Publishing the web build to fPanel
+### 5. Publishing the web app
+
+The web interface is built and served by **Render** as a static site (`podium-web` in `render.yaml`), next to the API. Every push to the deployed branch rebuilds `frontend/` and publishes `dist/` to Render's CDN, so there is no upload step to run by hand and no third-party file manager in the deploy path.
+
+```bash
+git push origin main      # rebuilds and publishes podium-web
+```
+
+* **First time** — Render Dashboard → **New → Blueprint**, pick this repository. The blueprint creates `podium-db`, `podium-api` and `podium-web`.
+* **After that** — a push is enough. Edits to `render.yaml` are only applied on a Blueprint **sync** (Dashboard → Blueprints → ⋯ → Sync), so changing hosting takes that one click.
+
+Three places must name the same origins. If any one of them is out of step, sign-in fails in a way that looks like a broken button rather than a configuration mistake:
+
+| Where | What it controls |
+| --- | --- |
+| `render.yaml` → `podium-web` → `VITE_GOOGLE_ALLOWED_ORIGINS` | origins the sign-in popup may open from (compiled into the bundle) |
+| `render.yaml` → `podium-api` → `CORS_ALLOWED_ORIGINS` | origins allowed to call the API from a browser |
+| Google Cloud Console → Credentials → this OAuth client → **Authorized JavaScript origins** | the origins Google itself will answer |
+
+The static site is reachable at `https://podium-web.onrender.com`. To serve it on `podiumclass.online`, add the domain under the static site's **Settings → Custom Domains** and point a CNAME at it — at Cloudflare that record must be **DNS only** (grey cloud), otherwise Render cannot issue the certificate. Both origins are already listed in the two files above, so a custom domain needs no rebuild once it is added in Google Console.
+
+No rewrite rules are configured: the router uses hash history (see the note below), so the browser only ever requests `/` and every route lives after the `#`.
+
+#### Fallback: the fPanel host
 
 `minatoflash82.ifnotus.space` is served from the fPanel hosting home, whose document root is owned by `root` — SCP/SFTP and the account terminal cannot write to it. fPanel's File Manager runs with root privileges, so deploys go through its file API:
 
@@ -144,7 +167,7 @@ The script builds with `npm run build`, zips `frontend/dist` with `index.html` a
 
 The host answers unregistered paths itself — `/login` redirects to the IFNOTUS portal and any other unknown path returns `204` with an empty body, and static hosting there has no rewrite-to-`index.html`. The web app therefore uses **hash history** (`/#/classroom/<code>`): the browser only ever requests `/`, so invite links and refreshes work regardless of what the server does with paths. `classroomInviteLink()` in `src/lib/links.ts` builds those links through the router, so they follow the history mode instead of hard-coding it.
 
-Two operational notes: the host sends no `Cache-Control`, so browsers may hold a previous `index.html` briefly after a deploy (old hashed bundles are kept for exactly that reason); and production builds need `VITE_API_URL` and `VITE_GOOGLE_ALLOWED_ORIGINS`, which `publish_frontend.py` supplies and verifies are inlined before publishing.
+Two operational notes: the host sends no `Cache-Control`, so browsers may hold a previous `index.html` briefly after a deploy (old hashed bundles are kept for exactly that reason); and production builds need `VITE_API_URL` and `VITE_GOOGLE_ALLOWED_ORIGINS`, which `publish_frontend.py` supplies and verifies are inlined before publishing (Render supplies the same values from `render.yaml`).
 
 ### 6. Building a signed Android APK
 

@@ -2,11 +2,18 @@
 #
 #   Dashboard -> New -> Blueprint -> pick this repository.
 #
-# This deploys only the API and its database. The web interface is built
-# separately and hosted as static files (fPanel); calls and recording come from
-# LiveKit Cloud. Nothing here needs Docker: gunicorn runs directly on Render's
-# Python runtime, and WhiteNoise serves the Django admin's static files because
-# there is no nginx in front of the process.
+# This deploys the API, its database, and the web interface. The web app is
+# built from this repository and served as a static site (see `podium-web`
+# below); calls and recording come from LiveKit Cloud. Nothing here needs
+# Docker: gunicorn runs directly on Render's Python runtime, and WhiteNoise
+# serves the Django admin's static files because there is no nginx in front of
+# the process.
+#
+# The web app used to be uploaded by hand to a shared panel host. That made a
+# single third party -- its file manager, its TLS, its cache -- a hard
+# dependency of every sign-in: when it stopped answering HTTPS, the SPA could
+# not be fetched at all and "login is broken" was really "the app is not there".
+# Building it here removes that dependency and makes a deploy a git push.
 #
 # Secrets are marked `sync: false`: Render prompts for them on first deploy and
 # stores them encrypted. They are never written into this file.
@@ -68,9 +75,11 @@ services:
           name: podium-db
           property: connectionString
       # The static front end's origin. The browser calls this API cross-origin,
-      # so every origin the SPA is served from belongs here.
+      # so every origin the SPA is served from belongs here. Keep in step with
+      # VITE_GOOGLE_ALLOWED_ORIGINS on podium-web and with the Google OAuth
+      # client's "Authorized JavaScript origins".
       - key: CORS_ALLOWED_ORIGINS
-        value: https://minatoflash82.ifnotus.space
+        value: https://podium-web.onrender.com,https://podiumclass.online,https://www.podiumclass.online,https://minatoflash82.ifnotus.space
       - key: CSRF_TRUSTED_ORIGINS
         value: https://podium-api.onrender.com
       # Bootstrap administrator. Render prompts for these on first deploy
@@ -107,6 +116,54 @@ services:
         value: /tmp/avatars
       - key: MAX_UPLOAD_BYTES
         value: "104857600"
+
+  # -------------------------------------------------------------------------
+  # Web interface (static site).
+  #
+  # Built from frontend/ on every push and served from Render's CDN, so the web
+  # app no longer depends on the panel host at all.
+  #
+  # No rewrite rules: the router uses hash history, so the browser only ever
+  # requests `/` and each route lives after the `#`. A catch-all rewrite would
+  # be dead weight at best and is the classic way to shadow /assets/ at worst.
+  # -------------------------------------------------------------------------
+  - type: web
+    name: podium-web
+    runtime: static
+    rootDir: frontend
+    # `--include=dev` is explicit because vue-tsc and vite are devDependencies:
+    # a production-only install would fail with "vite: not found".
+    buildCommand: "npm ci --include=dev && npm run build"
+    staticPublishPath: ./dist
+    envVars:
+      # Vite inlines VITE_* values at build time, so these are the settings the
+      # shipped JavaScript carries. They mirror BUILD_ENV_DEFAULTS in
+      # deploy/publish_frontend.py, which does the same for the panel host.
+      - key: NODE_VERSION
+        value: "22.12.0"
+      - key: VITE_API_URL
+        value: https://podium-api-r6sz.onrender.com
+      - key: VITE_GOOGLE_CLIENT_ID
+        value: 148808386481-qp65l50jmuabfte437aafmh85esth944.apps.googleusercontent.com
+      # Origins the sign-in button may open from. A page on an origin missing
+      # here refuses to start the popup, because Google's answer to an
+      # unregistered origin (origin_mismatch) is drawn inside a window this app
+      # cannot read, and would look like a dead button.
+      - key: VITE_GOOGLE_ALLOWED_ORIGINS
+        value: https://podium-web.onrender.com,https://podiumclass.online,https://www.podiumclass.online,https://minatoflash82.ifnotus.space
+    headers:
+      # Hashed build output is immutable by construction.
+      - path: /assets/*
+        name: Cache-Control
+        value: public, max-age=31536000, immutable
+      # The service worker and the entry document must never be cached: a stale
+      # copy keeps serving an old shell and updates stop arriving.
+      - path: /sw.js
+        name: Cache-Control
+        value: no-cache
+      - path: /index.html
+        name: Cache-Control
+        value: no-cache
 
 # ---------------------------------------------------------------------------
 # Attendance checker.

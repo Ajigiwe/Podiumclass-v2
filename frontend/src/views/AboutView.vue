@@ -79,8 +79,8 @@
       <section class="panel">
         <h2>Web app</h2>
         <p class="muted">Open Podium in a browser, or install it to your home screen.</p>
-        <a class="btn btn-primary" href="https://minatoflash82.ifnotus.space" target="_blank" rel="noopener">
-          <i class="fas fa-arrow-up-right-from-square"></i> minatoflash82.ifnotus.space
+        <a class="btn btn-primary" :href="webAppUrl" target="_blank" rel="noopener">
+          <i class="fas fa-arrow-up-right-from-square"></i> {{ webAppLabel }}
         </a>
       </section>
     </main>
@@ -98,7 +98,16 @@
   </div>
 </template>
 
-<script setup lang="ts"></script>
+<script setup lang="ts">
+// The web app's address, taken from the page itself rather than hardcoded.
+// The app has moved hosts once already (the panel host to this one), and a
+// hardcoded link meant the About page kept advertising an address that no
+// longer answered. Wherever this page is served from is, by definition, the
+// right link.
+const webAppUrl =
+  typeof window !== 'undefined' ? window.location.origin : 'https://podium-web.onrender.com';
+const webAppLabel = webAppUrl.replace(/^https?:\/\//, '');
+</script>
 
 <style scoped>
 .about {
