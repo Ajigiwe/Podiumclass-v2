@@ -198,6 +198,31 @@
             and install it from there.
           </p>
         </div>
+
+        <!-- The Android dashboard exactly as it ships: the same screen in both
+             themes, so the phone is not a drawing of the app. -->
+        <div class="mobile-shots" data-reveal>
+          <figure class="phone phone-light">
+            <img
+              src="/android-dashboard-light.jpg"
+              alt="Podium Class dashboard on Android in light mode"
+              width="540"
+              height="1200"
+              loading="lazy"
+              decoding="async"
+            />
+          </figure>
+          <figure class="phone phone-dark">
+            <img
+              src="/android-dashboard-dark.jpg"
+              alt="Podium Class dashboard on Android in dark mode"
+              width="540"
+              height="1200"
+              loading="lazy"
+              decoding="async"
+            />
+          </figure>
+        </div>
       </div>
     </section>
 
@@ -1076,8 +1101,55 @@ h2 {
 /* ------------------------------------------------------------------ mobile */
 .mobile-grid {
   display: grid;
-  grid-template-columns: minmax(0, 1fr);
-  max-width: 720px;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 0.92fr);
+  gap: 56px;
+  align-items: center;
+}
+
+/* Two real screenshots rather than a device mock-up drawing: the section's
+   claim is that the phone app is the same product, so the proof is the app. */
+.mobile-shots {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  padding: 8px 4px 20px;
+}
+
+.phone {
+  margin: 0;
+  width: min(48%, 224px);
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 24px;
+  background: var(--paper);
+  box-shadow:
+    0 30px 60px -30px rgba(13, 13, 26, 0.45),
+    0 2px 8px -2px rgba(13, 13, 26, 0.12);
+  transition: transform 0.35s ease, box-shadow 0.35s ease;
+}
+
+.phone img {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+/* A slight fan, so the pair reads as two phones rather than one wide image.
+   The light one sits lower; the dark one is the accent behind it. */
+.phone-light {
+  transform: rotate(-3deg) translateY(8px);
+}
+
+.phone-dark {
+  transform: rotate(2.5deg);
+}
+
+.phone:hover {
+  transform: rotate(0deg) translateY(-4px);
+  box-shadow:
+    0 36px 70px -30px rgba(13, 13, 26, 0.55),
+    0 2px 10px -2px rgba(13, 13, 26, 0.14);
 }
 
 .mobile-copy p {
