@@ -21,6 +21,7 @@ const kinds = ['mic', 'camera', 'screen'] as const;
 
 const isMutedAll = computed(() => store.isMutedAll);
 const autoApproveMic = computed(() => store.autoApproveMic);
+const autoApproveCamera = computed(() => store.autoApproveCamera);
 const policy = computed(() => store.permissionPolicy);
 const pending = computed(() => store.pendingRequests);
 
@@ -31,6 +32,11 @@ function onToggleMuteAll() {
 function onSmartMic(event: Event) {
   const checked = (event.target as HTMLInputElement).checked;
   void store.setAutoApproveMic(checked);
+}
+
+function onSmartCamera(event: Event) {
+  const checked = (event.target as HTMLInputElement).checked;
+  void store.setAutoApproveCamera(checked);
 }
 
 function togglePolicy(kind: MediaKind) {
@@ -45,7 +51,7 @@ function review(requestId: string, approve: boolean) {
 
 <template>
   <div class="p-3 border-b border-slate-200 bg-slate-50/70 flex flex-col gap-2.5 shrink-0">
-    <div class="flex items-center justify-between gap-2">
+    <div class="flex flex-wrap items-center justify-between gap-2">
       <button
         @click="onToggleMuteAll"
         class="px-3 py-1.5 text-[10px] font-bold uppercase tracking-wider bg-white hover:bg-slate-100 rounded-lg text-slate-800 border border-slate-200 transition-all flex items-center gap-1.5 cursor-pointer"
@@ -61,6 +67,15 @@ function review(requestId: string, approve: boolean) {
       >
         <input type="checkbox" :checked="autoApproveMic" @change="onSmartMic" class="rounded" />
         <span>Smart Mic</span>
+      </label>
+
+      <!-- A separate switch on purpose: clearing voices is not clearing faces. -->
+      <label
+        class="flex items-center gap-2 px-2.5 py-1.5 text-[10px] font-bold uppercase tracking-wider bg-white rounded-lg text-slate-800 border border-slate-200 cursor-pointer"
+        title="Answer camera requests automatically"
+      >
+        <input type="checkbox" :checked="autoApproveCamera" @change="onSmartCamera" class="rounded" />
+        <span>Smart Camera</span>
       </label>
     </div>
 

@@ -24,6 +24,10 @@ class Session(models.Model):
     verification_count = models.IntegerField(null=True, blank=True)
     auto_attendance_settings = models.JSONField(null=True, blank=True)
     auto_approve_mic = models.BooleanField(default=False)
+    # Smart Camera: the same pre-clearance for the camera. Separate from the
+    # microphone on purpose -- a host who is happy to be interrupted by a voice
+    # has not thereby agreed to be interrupted by a face.
+    auto_approve_camera = models.BooleanField(default=False)
     is_muted_all = models.BooleanField(default=False)
     require_guest_details = models.BooleanField(default=False)
     status = models.CharField(max_length=32, default="active", db_index=True) # scheduled, active, ended, deleted

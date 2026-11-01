@@ -11,20 +11,31 @@ from .models import Session, Participant, ChatMessage, PermissionRequest, Partic
 PERMISSION_TYPES = ("mic", "camera", "screen")
 PERMISSION_MODES = ("free", "approval")
 
+# What a class starts with when its host has never touched moderation.
+#
+# The microphone and the screen stay free: they are how a class actually runs,
+# and every approval costs the host a tap. The camera is the exception. Students
+# never publish video in these classes -- the video is the lecturer's screen
+# share -- so a participant reaching for their camera is the rare case, and the
+# host should be the one who decides. "approval" is a gate, not a switch that is
+# off: a grant is stored per person (ParticipantPermission.camera_permission)
+# and outranks this policy from then on, so the camera can still be turned on.
+DEFAULT_PERMISSIONS = {"mic": "free", "camera": "approval", "screen": "free"}
+
 
 def read_permissions(session: Session) -> dict:
     """
     The session's permission policy, always complete and always valid.
 
     Stored in ``Session.metadata`` so an old row (or a hand-edited one) that is
-    missing keys or holding junk still reads as 'free' rather than exploding
-    into an unknown mode the client cannot render.
+    missing keys or holding junk still reads as its default rather than
+    exploding into an unknown mode the client cannot render.
     """
     stored = (session.metadata or {}).get("permissions") or {}
     if not isinstance(stored, dict):
         stored = {}
     return {
-        key: stored.get(key) if stored.get(key) in PERMISSION_MODES else "free"
+        key: stored.get(key) if stored.get(key) in PERMISSION_MODES else DEFAULT_PERMISSIONS[key]
         for key in PERMISSION_TYPES
     }
 
@@ -54,6 +65,7 @@ class SessionSerializer(serializers.ModelSerializer):
     # muted and which media need approval, instead of inheriting a stale view.
     isMutedAll = serializers.BooleanField(source="is_muted_all", read_only=True)
     autoApproveMic = serializers.BooleanField(source="auto_approve_mic", read_only=True)
+    autoApproveCamera = serializers.BooleanField(source="auto_approve_camera", read_only=True)
     permissions = serializers.SerializerMethodField()
     # How long the class actually ran, as opposed to how long it was booked
     # for. See get_actualDurationMinutes.
@@ -67,7 +79,7 @@ class SessionSerializer(serializers.ModelSerializer):
             'scheduledStartTime', 'durationMinutes', 'participantCount',
             'createdAt', 'startedAt', 'endedAt', 'hostId',
             'verificationCount', 'autoAttendanceSettings',
-            'isMutedAll', 'autoApproveMic', 'permissions',
+            'isMutedAll', 'autoApproveMic', 'autoApproveCamera', 'permissions',
             'actualDurationMinutes', 'attendeeCount', 'presentCount',
         ]
 

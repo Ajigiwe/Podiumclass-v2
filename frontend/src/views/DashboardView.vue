@@ -386,9 +386,10 @@
       </div>
     </div>
 
-    <!-- Records: the host's recordings, with what they can do about them.
-         Only hosts have any, so the section is theirs alone. -->
-    <div v-if="canHost" class="space-y-4">
+    <!-- Records: everything this account runs or co-hosts. The classroom no
+         longer carries its own shelf; this is the one place recordings live.
+         A student has none, so the section stays out of their dashboard. -->
+    <div v-if="canHost || recordings.length" class="space-y-4">
       <div class="flex items-center gap-3">
         <h2 class="text-[12px] font-bold text-[#0D0D1A] dark:text-white uppercase tracking-widest">Records</h2>
         <div class="h-px flex-1 bg-[#DDE0F0] dark:bg-slate-800"></div>
@@ -813,14 +814,15 @@ const visibleRecordings = computed(
 );
 
 /**
- * The host's recordings, in one request.
+ * Every recording this account can see, in one request.
  *
- * Only hosts have this section at all, and the server only returns the classes
- * they run -- so there is nothing to filter here, and a student's dashboard
- * makes no recording call.
+ * The server scopes the answer to classes the caller hosts or co-hosts, so
+ * there is nothing to filter here. A student gets an empty list and the
+ * section stays hidden; a co-host gets the classes they help run even though
+ * they cannot create one.
  */
 async function loadRecordings() {
-  if (!canHost.value || !recordingsEnabled.value) return;
+  if (!recordingsEnabled.value) return;
   isLoadingRecordings.value = true;
   recordsError.value = '';
   try {

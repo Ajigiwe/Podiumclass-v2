@@ -6,6 +6,7 @@ import {
   ConnectionState,
   Track,
   VideoPresets,
+  ScreenSharePresets,
   type RemoteParticipant,
   type RemoteVideoTrack,
 } from 'livekit-client';
@@ -156,9 +157,17 @@ export const useClassroomStore = defineStore('classroom', () => {
   const isModerator = ref(false);
   const isMutedAll = ref(false);
   const autoApproveMic = ref(false);
+  // Smart Camera: the same pre-clearance for the camera, kept as its own switch
+  // because a host willing to be interrupted by a voice has not thereby agreed
+  // to be interrupted by a face.
+  const autoApproveCamera = ref(false);
+  // Mirrors the server's default (DEFAULT_PERMISSIONS in the classroom
+  // serializer) so the first paint agrees with the session row: the mic and the
+  // screen are free, the camera is behind approval. Students never publish
+  // video here -- a camera request is the exception, and the host decides.
   const permissionPolicy = ref<Record<MediaKind, PermissionMode>>({
     mic: 'free',
-    camera: 'free',
+    camera: 'approval',
     screen: 'free',
   });
   // What *this* participant has been personally cleared to use.
@@ -765,6 +774,7 @@ export const useClassroomStore = defineStore('classroom', () => {
   function applyModerationState(state: any) {
     if (typeof state?.isMutedAll === 'boolean') isMutedAll.value = state.isMutedAll;
     if (typeof state?.autoApproveMic === 'boolean') autoApproveMic.value = state.autoApproveMic;
+    if (typeof state?.autoApproveCamera === 'boolean') autoApproveCamera.value = state.autoApproveCamera;
     if (state?.permissions && typeof state.permissions === 'object') {
       permissionPolicy.value = { ...permissionPolicy.value, ...state.permissions };
     }
@@ -1356,30 +1366,92 @@ export const useClassroomStore = defineStore('classroom', () => {
 
   async function toggleScreenShare() {
     const r = room.value;
+    if (!r) return;
+
     if (isScreenSharing.value) {
+      try {
+        await r.localParticipant.setScreenShareEnabled(false);
+      } catch {
+        // Already stopped from the browser's own sharing bar.
+      }
       localScreenStream.value?.getTracks().forEach((t) => t.stop());
       localScreenStream.value = null;
-      try {
-        await r?.localParticipant.setScreenShareEnabled(false);
-      } catch {}
       isScreenSharing.value = false;
-    } else {
-      try {
-        const stream = await navigator.mediaDevices.getDisplayMedia({ video: true });
-        localScreenStream.value = stream;
-        isScreenSharing.value = true;
-        stream.getVideoTracks()[0]?.addEventListener('ended', () => {
-          isScreenSharing.value = false;
+      updateParticipants();
+      return;
+    }
+
+    try {
+      /*
+       * Capture once, through the SDK.
+       *
+       * This used to call `getDisplayMedia()` here *and* again inside
+       * `setScreenShareEnabled(true)`: two captures of the same screen, two
+       * pickers in some browsers, and a local preview wired to a stream nobody
+       * else ever received. The SDK's own capture is the one that gets
+       * published, so it is the only one worth having.
+       *
+       * The encoding is capped for what this app actually is: one lecturer's
+       * slides watched by a whole class. Left alone, the SDK publishes screen
+       * share at 2.5 Mbps (ScreenSharePresets.h1080fps15) to *every* viewer, so
+       * 200 students cost 500 Mbps -- roughly 230 GB an hour, which no monthly
+       * allowance survives. A megabit carries a slide deck at 1080p15, and
+       * `maintain-resolution` keeps text sharp by dropping frames rather than
+       * resolution when a link is tight. The two lower layers are what make the
+       * saving real: with `adaptiveStream` on, a phone showing the stage takes
+       * the 200 kbps layer instead of the megabit one.
+       */
+      const publication = await r.localParticipant.setScreenShareEnabled(
+        true,
+        {
+          audio: false,
+          video: true,
+          resolution: VideoPresets.h1080.resolution,
+          // Text, not motion: the encoder should keep glyphs legible.
+          contentHint: 'detail',
+          // Don't offer the lecturer their own tab -- it echoes back into the
+          // room and confuses everyone watching.
+          selfBrowserSurface: 'exclude',
+        },
+        {
+          simulcast: true,
+          screenShareEncoding: { maxBitrate: 1_200_000, maxFramerate: 15 },
+          screenShareSimulcastLayers: [
+            ScreenSharePresets.h360fps3, // ~200 kbps, 360p — phones
+            ScreenSharePresets.h720fps5, // ~800 kbps, 720p — laptops
+          ],
+          degradationPreference: 'maintain-resolution',
+        }
+      );
+
+      isScreenSharing.value = true;
+
+      const track = publication?.videoTrack;
+      if (track) {
+        localScreenStream.value = new MediaStream([track.mediaStreamTrack]);
+        // The browser's "Stop sharing" bar ends the track without telling this
+        // store; mirror it, or the stage keeps showing a frozen screen.
+        track.mediaStreamTrack.addEventListener('ended', () => {
+          void r.localParticipant.setScreenShareEnabled(false).catch(() => {});
           localScreenStream.value = null;
+          isScreenSharing.value = false;
           updateParticipants();
         });
-        try {
-          await r?.localParticipant.setScreenShareEnabled(true);
-        } catch {}
-      } catch (err) {
-        console.warn('Screen share cancelled or failed:', err);
       }
+    } catch (err) {
+      /*
+       * Cancelling the picker is a decision, not a failure: it must not raise a
+       * banner. Only a real refusal is worth telling the room about.
+       */
+      const message = err instanceof Error ? err.message : String(err ?? '');
+      const cancelled = /cancel|denied|permission|NotAllowed|abort/i.test(message);
+      if (!cancelled) {
+        errorMessage.value = `Screen sharing could not start: ${message || 'unknown error'}`;
+      }
+      localScreenStream.value = null;
+      isScreenSharing.value = false;
     }
+
     updateParticipants();
   }
 
@@ -1537,6 +1609,7 @@ export const useClassroomStore = defineStore('classroom', () => {
         type: 'moderation',
         isMutedAll: isMutedAll.value,
         autoApproveMic: autoApproveMic.value,
+        autoApproveCamera: autoApproveCamera.value,
         permissions: { ...permissionPolicy.value },
       },
       'moderation'
@@ -1558,6 +1631,11 @@ export const useClassroomStore = defineStore('classroom', () => {
   /** Lecturer: let microphone asks answer themselves (Smart Mic). */
   async function setAutoApproveMic(enabled: boolean) {
     await persistModeration({ autoApproveMic: enabled });
+  }
+
+  /** Lecturer: let camera asks answer themselves (Smart Camera). */
+  async function setAutoApproveCamera(enabled: boolean) {
+    await persistModeration({ autoApproveCamera: enabled });
   }
 
   /** Lecturer: put one medium behind host approval -- or open it again. */
@@ -2021,7 +2099,8 @@ export const useClassroomStore = defineStore('classroom', () => {
     recordings.value = [];
     isMutedAll.value = false;
     autoApproveMic.value = false;
-    permissionPolicy.value = { mic: 'free', camera: 'free', screen: 'free' };
+    autoApproveCamera.value = false;
+    permissionPolicy.value = { mic: 'free', camera: 'approval', screen: 'free' };
     myPermissions.value = { mic: false, camera: false, screen: false };
     requestedKinds.value = { mic: false, camera: false, screen: false };
     pendingRequests.value = [];
@@ -2082,6 +2161,8 @@ export const useClassroomStore = defineStore('classroom', () => {
     isRecordingPaused,
     isMutedAll,
     autoApproveMic,
+    autoApproveCamera,
+    setAutoApproveCamera,
     permissionPolicy,
     myPermissions,
     requestedKinds,

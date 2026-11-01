@@ -228,7 +228,7 @@ class ClassroomModerationTests(TestCase):
         doc = res.json()["document"]
         self.assertFalse(doc["isMutedAll"])
         self.assertFalse(doc["autoApproveMic"])
-        self.assertEqual(doc["permissions"], {"mic": "free", "camera": "free", "screen": "free"})
+        self.assertEqual(doc["permissions"], {"mic": "free", "camera": "approval", "screen": "free"})
 
     def test_host_persists_mute_all_smart_mic_and_policy(self):
         res = self.client.patch(
@@ -256,7 +256,7 @@ class ClassroomModerationTests(TestCase):
             self.url(), data={"permissions": {"mic": "approval"}}, format="json"
         )
         doc = self.client.get(self.url()).json()["document"]
-        self.assertEqual(doc["permissions"], {"mic": "approval", "camera": "free", "screen": "free"})
+        self.assertEqual(doc["permissions"], {"mic": "approval", "camera": "approval", "screen": "free"})
 
     def test_student_cannot_change_moderation(self):
         self.as_user(self.student)
@@ -404,6 +404,31 @@ class ClassroomModerationTests(TestCase):
         )
         self.assertEqual(res.json()["document"]["status"], "pending")
         self.assertFalse(self.client.get(self.url("permissions/")).json()["document"]["camera"])
+
+    def test_smart_camera_approves_camera_asks_server_side(self):
+        self.client.patch(self.url(), data={"autoApproveCamera": True}, format="json")
+
+        self.as_user(self.student)
+        res = self.client.post(
+            self.url("permissions/requests/"), data={"requestType": "camera"}, format="json"
+        )
+        self.assertEqual(res.status_code, 201)
+        self.assertEqual(res.json()["document"]["status"], "approved")
+        self.assertTrue(self.client.get(self.url("permissions/")).json()["document"]["camera"])
+
+        # Nothing waits in the inbox for the host to click.
+        self.as_user(self.host)
+        self.assertEqual(self.client.get(self.url("permissions/requests/")).json()["documents"], [])
+
+    def test_smart_camera_only_covers_the_camera(self):
+        self.client.patch(self.url(), data={"autoApproveCamera": True}, format="json")
+        self.as_user(self.student)
+        res = self.client.post(
+            self.url("permissions/requests/"), data={"requestType": "mic"}, format="json"
+        )
+        # The microphone has its own switch; Smart Camera must not answer for it.
+        self.assertEqual(res.json()["document"]["status"], "pending")
+        self.assertFalse(self.client.get(self.url("permissions/")).json()["document"]["mic"])
 
     def test_inbox_is_host_only(self):
         self.as_user(self.student)
@@ -620,7 +645,7 @@ class CoHostTests(TestCase):
 
         doc = self.client.get(self.url()).json()["document"]
         self.assertEqual(doc["permissions"]["mic"], "approval")
-        self.assertEqual(doc["permissions"]["camera"], "free")
+        self.assertEqual(doc["permissions"]["camera"], "approval")
 
     def test_a_cohost_can_run_the_permission_inbox(self):
         self.appoint()

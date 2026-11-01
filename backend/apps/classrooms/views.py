@@ -295,7 +295,9 @@ class SessionDetailView(APIView):
             # attendance configuration.
             stray = [
                 key for key in data
-                if key not in ("isMutedAll", "autoApproveMic", "permissions")
+                if key not in (
+                    "isMutedAll", "autoApproveMic", "autoApproveCamera", "permissions"
+                )
             ]
             if stray:
                 return Response(
@@ -303,7 +305,7 @@ class SessionDetailView(APIView):
                         "error": {
                             "code": "FORBIDDEN",
                             "message": "Co-hosts can only change moderation settings.",
-                            "details": f"Allowed: isMutedAll, autoApproveMic, permissions. Got: {', '.join(map(str, stray))}.",
+                            "details": f"Allowed: isMutedAll, autoApproveMic, autoApproveCamera, permissions. Got: {', '.join(map(str, stray))}.",
                         }
                     },
                     status=status.HTTP_403_FORBIDDEN
@@ -335,6 +337,10 @@ class SessionDetailView(APIView):
                 session.is_muted_all = muted
             if "autoApproveMic" in data:
                 session.auto_approve_mic = _as_bool(data["autoApproveMic"], "autoApproveMic")
+            if "autoApproveCamera" in data:
+                session.auto_approve_camera = _as_bool(
+                    data["autoApproveCamera"], "autoApproveCamera"
+                )
             if "permissions" in data:
                 session.metadata = {
                     **(session.metadata or {}),
@@ -813,9 +819,11 @@ class SessionPermissionRequestsView(APIView):
             { "documents": [ { id, participantId, participantName, requestType, status, ... } ] }
     POST -> a participant asks for one medium: { "requestType": "mic" }
 
-    Smart Mic (``Session.auto_approve_mic``) answers microphone asks on the
-    server, so a raised hand turns into a live microphone even when the host is
+    Smart Mic (``Session.auto_approve_mic``) and Smart Camera
+    (``Session.auto_approve_camera``) answer asks for their own medium on the
+    server, so a request turns into a live device even when the host is
     mid-sentence -- and the answer is identical whoever is holding the phone.
+    They are independent: each flag covers exactly one medium.
     """
     permission_classes = [IsAuthenticated]
 
@@ -850,7 +858,11 @@ class SessionPermissionRequestsView(APIView):
         if pending:
             return Response(permission_request_payload(pending))
 
-        auto_approve = bool(session.auto_approve_mic) and request_type == "mic"
+        auto_approve = (
+            (request_type == "mic" and bool(session.auto_approve_mic))
+            or (request_type == "camera" and bool(session.auto_approve_camera))
+        )
+        auto_approver = "smart-mic" if request_type == "mic" else "smart-camera"
         row = PermissionRequest.objects.create(
             id=f"prq_{uuid.uuid4().hex[:16]}",
             session=session,
@@ -859,10 +871,12 @@ class SessionPermissionRequestsView(APIView):
             request_type=request_type,
             status="approved" if auto_approve else "pending",
             reviewed_at=timezone.now() if auto_approve else None,
-            reviewed_by="smart-mic" if auto_approve else None,
+            reviewed_by=auto_approver if auto_approve else None,
         )
         if auto_approve:
-            _grant_permission(session, request.user.id, request_type, granted_by="smart-mic")
+            _grant_permission(
+                session, request.user.id, request_type, granted_by=auto_approver
+            )
         return Response(permission_request_payload(row), status=status.HTTP_201_CREATED)
 
 
