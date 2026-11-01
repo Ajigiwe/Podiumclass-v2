@@ -432,12 +432,14 @@ class LiveKitRoomManager(private val context: Context) {
     suspend fun broadcastModeration(
         isMutedAll: Boolean,
         autoApproveMic: Boolean,
+        autoApproveCamera: Boolean,
         permissions: online.podiumclass.app.data.api.models.PermissionPolicyDto
     ) {
         val packet = DataPacket(
             type = "moderation",
             isMutedAll = isMutedAll,
             autoApproveMic = autoApproveMic,
+            autoApproveCamera = autoApproveCamera,
             permissions = permissions
         )
         publishData(packet, "moderation")

@@ -14,6 +14,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Refresh
@@ -31,10 +32,16 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.core.content.FileProvider
 import online.podiumclass.app.data.api.models.RecordingDto
+import online.podiumclass.app.data.recording.LocalRecording
+import online.podiumclass.app.data.recording.LocalRecords
 import online.podiumclass.app.ui.theme.*
+import java.io.File
+import java.text.DateFormat
 import java.time.OffsetDateTime
 import java.time.format.DateTimeFormatter
+import java.util.Date
 import java.util.Locale
 
 /**
@@ -56,6 +63,15 @@ fun RecordsSection(
     // Which recording is open in the player. One at a time: two decoders
     // running at once on a phone is how a stage starts stuttering.
     var openId by remember { mutableStateOf<String?>(null) }
+
+    val context = LocalContext.current
+    // Recordings taken on this phone live in its own storage, so this half of
+    // the shelf is read from the device instead of the server. It is re-read on
+    // every visit and whenever the refresh control is used, which is enough:
+    // the only way a file gets here is the app having just written it.
+    var local by remember { mutableStateOf<List<LocalRecording>>(emptyList()) }
+    var localTick by remember { mutableStateOf(0) }
+    LaunchedEffect(localTick) { local = LocalRecords.all(context) }
 
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -81,7 +97,10 @@ fun RecordsSection(
                 tint = colors.textSecondary,
                 modifier = Modifier
                     .size(18.dp)
-                    .clickable { onRefresh() }
+                    .clickable {
+                        localTick++
+                        onRefresh()
+                    }
             )
         }
 
@@ -94,9 +113,39 @@ fun RecordsSection(
             )
         }
 
-        if (recordings.isEmpty() && !isLoading && error == null) {
+        // Phone captures come first: they need no network, no signed URL and
+        // no processing, so they are always available.
+        if (local.isNotEmpty()) {
             Text(
-                text = "No recordings yet. Start one from inside a class.",
+                text = "ON THIS PHONE",
+                color = colors.textTertiary,
+                fontSize = 10.sp,
+                fontWeight = FontWeight.Bold,
+                letterSpacing = 1.sp
+            )
+            local.forEach { rec ->
+                LocalRecordingCard(
+                    rec = rec,
+                    isOpen = openId == rec.id,
+                    onTogglePlay = { openId = if (openId == rec.id) null else rec.id },
+                    onChanged = { localTick++ }
+                )
+            }
+        }
+
+        if (recordings.isNotEmpty()) {
+            Text(
+                text = "FROM THE SERVER",
+                color = colors.textTertiary,
+                fontSize = 10.sp,
+                fontWeight = FontWeight.Bold,
+                letterSpacing = 1.sp
+            )
+        }
+
+        if (recordings.isEmpty() && local.isEmpty() && !isLoading && error == null) {
+            Text(
+                text = "No recordings yet. Start one from inside a class — it is saved to this phone.",
                 color = colors.textSecondary,
                 fontSize = 12.sp
             )
@@ -215,6 +264,129 @@ private fun RecordingCard(
     }
 }
 
+/**
+ * A class captured on this phone.
+ *
+ * There is no status to poll and no download to wait for: the MP4 is in the
+ * phone's own storage, so every action here works offline, and "delete" is the
+ * only way to lose it.
+ */
+@Composable
+private fun LocalRecordingCard(
+    rec: LocalRecording,
+    isOpen: Boolean,
+    onTogglePlay: () -> Unit,
+    onChanged: () -> Unit
+) {
+    val colors = AppTheme.colors
+    val context = LocalContext.current
+    var confirmDelete by remember { mutableStateOf(false) }
+
+    Card(
+        shape = RoundedCornerShape(12.dp),
+        colors = CardDefaults.cardColors(containerColor = colors.surface),
+        modifier = Modifier
+            .fillMaxWidth()
+            .border(1.dp, colors.cardBorder, RoundedCornerShape(12.dp))
+    ) {
+        Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = rec.title.ifBlank { "Class recording" },
+                        color = colors.textPrimary,
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Bold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    Text(
+                        text = localMetaLine(rec),
+                        color = colors.textTertiary,
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        letterSpacing = 0.5.sp,
+                        modifier = Modifier.padding(top = 2.dp)
+                    )
+                }
+                val tint = if (rec.pending) colors.warning else colors.success
+                Text(
+                    text = if (rec.pending) "SAVING" else "ON PHONE",
+                    color = tint,
+                    fontSize = 9.sp,
+                    fontWeight = FontWeight.Black,
+                    letterSpacing = 1.sp,
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(6.dp))
+                        .background(tint.copy(alpha = 0.15f))
+                        .border(1.dp, tint.copy(alpha = 0.3f), RoundedCornerShape(6.dp))
+                        .padding(horizontal = 6.dp, vertical = 3.dp)
+                )
+            }
+
+            if (isOpen && !rec.pending) {
+                RecordingPlayer(
+                    url = playbackUri(context, rec),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(200.dp)
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(Color.Black)
+                )
+            }
+
+            if (!rec.pending) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    SmallAction(
+                        icon = if (isOpen) Icons.Default.Stop else Icons.Default.PlayArrow,
+                        label = if (isOpen) "Close" else "Play",
+                        tint = colors.primary,
+                        onClick = onTogglePlay
+                    )
+                    SmallAction(
+                        icon = Icons.Default.Share,
+                        label = "Share",
+                        tint = colors.textSecondary,
+                        onClick = { shareLocalRecording(context, rec) }
+                    )
+                    SmallAction(
+                        icon = Icons.Default.Delete,
+                        label = "Delete",
+                        tint = colors.error,
+                        onClick = { confirmDelete = true }
+                    )
+                }
+            }
+        }
+    }
+
+    // Deleting frees the space the video occupies, so it asks first.
+    if (confirmDelete) {
+        AlertDialog(
+            onDismissRequest = { confirmDelete = false },
+            title = { Text("Delete this recording?") },
+            text = { Text("The video is removed from this phone. This cannot be undone.") },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        LocalRecords.remove(context, rec)
+                        confirmDelete = false
+                        onChanged()
+                    }
+                ) {
+                    Text("Delete", color = colors.error)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { confirmDelete = false }) { Text("Keep") }
+            }
+        )
+    }
+}
+
 @Composable
 private fun StatusChip(rec: RecordingDto) {
     val colors = AppTheme.colors
@@ -302,6 +474,55 @@ private fun RecordingPlayer(url: String, modifier: Modifier = Modifier) {
             player?.stopPlayback()
             player = null
         }
+    }
+}
+
+/**
+ * The URI a player can open.
+ *
+ * Android 10+ fingers the MediaStore row directly. On 8/9 the recording is a
+ * file in the app's external Movies folder, and handing another process a
+ * `file://` path is refused -- so it leaves as a scoped `content://` instead.
+ */
+private fun playbackUri(context: Context, rec: LocalRecording): String {
+    val uri = Uri.parse(rec.uri)
+    if (uri.scheme != "file") return rec.uri
+    val path = uri.path ?: return rec.uri
+    return try {
+        FileProvider.getUriForFile(
+            context,
+            "${context.packageName}.fileprovider",
+            File(path)
+        ).toString()
+    } catch (e: Exception) {
+        rec.uri
+    }
+}
+
+private fun localMetaLine(rec: LocalRecording): String {
+    val parts = mutableListOf<String>()
+    parts += try {
+        DateFormat.getDateTimeInstance(DateFormat.MEDIUM, DateFormat.SHORT)
+            .format(Date(rec.startedAtMillis))
+    } catch (e: Exception) {
+        ""
+    }
+    if (rec.durationMs > 0) parts += formatDuration(rec.durationMs / 1000)
+    if (rec.sizeBytes > 0) parts += formatSize(rec.sizeBytes)
+    return parts.filter { it.isNotBlank() }.joinToString("  •  ")
+}
+
+private fun shareLocalRecording(context: Context, rec: LocalRecording) {
+    try {
+        val intent = Intent(Intent.ACTION_SEND).apply {
+            type = "video/mp4"
+            putExtra(Intent.EXTRA_STREAM, Uri.parse(playbackUri(context, rec)))
+            putExtra(Intent.EXTRA_SUBJECT, rec.title)
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
+        context.startActivity(Intent.createChooser(intent, "Share recording"))
+    } catch (e: Exception) {
+        Toast.makeText(context, "Could not share: ${e.localizedMessage}", Toast.LENGTH_LONG).show()
     }
 }
 

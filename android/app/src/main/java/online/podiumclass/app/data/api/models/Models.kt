@@ -82,7 +82,11 @@ data class AutoAttendanceSettingsDto(
 @Serializable
 data class PermissionPolicyDto(
     val mic: String = "free",
-    val camera: String = "free",
+    // Matches DEFAULT_PERMISSIONS on the server: the camera starts behind the
+    // host's approval, because students watch a shared screen rather than
+    // publish video. A grant is stored per participant, so it is a gate and not
+    // a switch that is off.
+    val camera: String = "approval",
     val screen: String = "free"
 )
 
@@ -191,6 +195,7 @@ data class SessionDto(
     val autoAttendanceSettings: AutoAttendanceSettingsDto? = null,
     val isMutedAll: Boolean = false,
     val autoApproveMic: Boolean = false,
+    val autoApproveCamera: Boolean = false,
     val permissions: PermissionPolicyDto = PermissionPolicyDto(),
     val backupModId: String? = null
 )
@@ -219,6 +224,7 @@ data class PatchSessionRequest(
     val is_active: Boolean? = null,
     val isMutedAll: Boolean? = null,
     val autoApproveMic: Boolean? = null,
+    val autoApproveCamera: Boolean? = null,
     val permissions: Map<String, String>? = null
 )
 
@@ -434,6 +440,7 @@ data class DataPacket(
     // Moderation & Permissions
     val isMutedAll: Boolean? = null,
     val autoApproveMic: Boolean? = null,
+    val autoApproveCamera: Boolean? = null,
     val permissions: PermissionPolicyDto? = null,
     val requestType: String? = null,
     val target: String? = null,

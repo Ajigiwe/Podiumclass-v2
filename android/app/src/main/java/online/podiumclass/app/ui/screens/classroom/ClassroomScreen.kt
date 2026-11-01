@@ -5,6 +5,7 @@ import android.app.Application
 import android.app.PictureInPictureParams
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.media.projection.MediaProjectionManager
 import android.net.Uri
 import android.os.Build
 import android.provider.Settings
@@ -48,6 +49,7 @@ import io.livekit.android.renderer.TextureViewRenderer
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import online.podiumclass.app.data.livekit.ParticipantTileState
+import online.podiumclass.app.data.notify.PodiumNotifications
 import online.podiumclass.app.ui.theme.*
 
 /**
@@ -191,6 +193,7 @@ fun ClassroomScreen(
     // Moderation & Permissions States
     val isMutedAll by viewModel.isMutedAll.collectAsState()
     val autoApproveMic by viewModel.autoApproveMic.collectAsState()
+    val autoApproveCamera by viewModel.autoApproveCamera.collectAsState()
     val permissionPolicy by viewModel.permissionPolicy.collectAsState()
     val pendingRequests by viewModel.pendingRequests.collectAsState()
     val coHosts by viewModel.coHosts.collectAsState()
@@ -238,6 +241,63 @@ fun ClassroomScreen(
     val isRecording by viewModel.isRecording.collectAsState()
     val isRecordingStarting by viewModel.isRecordingStarting.collectAsState()
     val recordingSeconds by viewModel.recordingSeconds.collectAsState()
+    val isRoomRecording by viewModel.isRoomRecording.collectAsState()
+
+    //
+    // The session that is still running: the reminder in the shade, and the
+    // foreground service that keeps the room alive behind it.
+    //
+    // Both follow the room connection rather than the screen. They appear when
+    // this phone is actually in the class, survive being switched away from
+    // (including the picture-in-picture window below, which returns before the
+    // rest of this composable builds), and are torn down the moment the room is
+    // left or closed -- so neither the shade nor a held-open microphone can
+    // outlive the class.
+    //
+    val roomConnected by viewModel.roomManager.isConnected.collectAsState()
+    val liveClassName = session?.title?.takeIf { it.isNotBlank() } ?: "Class in progress"
+    DisposableEffect(roomConnected) {
+        if (roomConnected) {
+            PodiumNotifications.startLiveClass(
+                context.applicationContext,
+                liveClassName,
+                isCameraOn
+            )
+            onDispose { PodiumNotifications.stopLiveClass(context.applicationContext) }
+        } else {
+            PodiumNotifications.stopLiveClass(context.applicationContext)
+            onDispose { }
+        }
+    }
+    // The session row can arrive after the join (and the camera can be switched
+    // on later), so the label and the foreground type are refreshed without
+    // touching the clock the notification is counting from.
+    LaunchedEffect(roomConnected, liveClassName, isCameraOn) {
+        if (roomConnected) {
+            PodiumNotifications.updateLiveClass(
+                context.applicationContext,
+                liveClassName,
+                isCameraOn
+            )
+        }
+    }
+
+    // Screen-capture consent. The MP4 is written on this phone, so the system
+    // prompt is the only thing between the host and the file -- there is no
+    // server worker to wait on and nothing to poll for afterwards.
+    val projectionManager = remember(context) {
+        context.getSystemService(MediaProjectionManager::class.java)
+    }
+    val recordLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        val granted = result.data
+        if (result.resultCode == Activity.RESULT_OK && granted != null) {
+            viewModel.startLocalRecording(result.resultCode, granted)
+        } else {
+            viewModel.onRecordingDeclined()
+        }
+    }
 
     var showChatDrawer by remember { mutableStateOf(false) }
 
@@ -451,14 +511,15 @@ fun ClassroomScreen(
                                 Spacer(modifier = Modifier.width(6.dp))
                             }
 
-                            // Host/co-host: record the session. The MP4 is
-                            // written on the server, so this button only asks
-                            // for it -- which is what lets a phone start one.
+                            // Host/co-host: record the session onto this phone.
+                            // Nothing is uploaded and no server disk is used, so
+                            // a one-hour class costs the deployment nothing and
+                            // the file is in Movies/Podium when it stops.
                             //
-                            // While the worker's pipeline is coming up the
-                            // control says "Starting..." and ignores taps: a
-                            // stop offered over a take that has not begun is
-                            // the one way to lose a recording.
+                            // While the encoder is being wired up the control
+                            // says "Starting..." and ignores taps: a stop
+                            // offered over a take that has not begun is the one
+                            // way to lose a recording.
                             if (isModerator) {
                                 Row(
                                     verticalAlignment = Alignment.CenterVertically,
@@ -474,8 +535,13 @@ fun ClassroomScreen(
                                             RoundedCornerShape(10.dp)
                                         )
                                         .clickable(enabled = !isRecordingStarting) {
-                                            if (isRecording) viewModel.stopRecording()
-                                            else viewModel.startRecording()
+                                            if (isRecording) {
+                                                viewModel.stopRecording()
+                                            } else {
+                                                recordLauncher.launch(
+                                                    projectionManager.createScreenCaptureIntent()
+                                                )
+                                            }
                                         }
                                         .padding(horizontal = 8.dp, vertical = 6.dp)
                                 ) {
@@ -507,11 +573,11 @@ fun ClassroomScreen(
                                     )
                                 }
                                 Spacer(modifier = Modifier.width(6.dp))
-                            } else if (isRecording && !isRecordingStarting) {
-                                // A student should know the class is being
-                                // recorded -- the badge is the only sign of it.
-                                // The pipeline has to be capturing for that to
-                                // be true; a starting one is not a recording yet.
+                            } else if (isRoomRecording) {
+                                // A student is told when the *class* is being
+                                // recorded on the server. A capture on the
+                                // host's own phone is not announced: it is their
+                                // private note, not a class-wide recording.
                                 Row(
                                     verticalAlignment = Alignment.CenterVertically,
                                     modifier = Modifier
@@ -775,6 +841,7 @@ fun ClassroomScreen(
                 RoomModerationModal(
                     isMutedAll = isMutedAll,
                     autoApproveMic = autoApproveMic,
+                    autoApproveCamera = autoApproveCamera,
                     permissionPolicy = permissionPolicy,
                     pendingRequests = pendingRequests,
                     coHosts = coHosts,
@@ -782,6 +849,7 @@ fun ClassroomScreen(
                     onDismiss = { showModerationModal = false },
                     onToggleMuteAll = { viewModel.setMuteAll(!isMutedAll) },
                     onToggleSmartMic = { viewModel.setAutoApproveMic(it) },
+                    onToggleSmartCamera = { viewModel.setAutoApproveCamera(it) },
                     onTogglePolicy = { kind ->
                         val current = when (kind) {
                             "mic" -> permissionPolicy.mic

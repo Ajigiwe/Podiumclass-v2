@@ -15,6 +15,10 @@
     <!-- Foreground services for background class audio and screen share -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION" tools:targetApi="q" />
+    <!-- The live class falls back to this type when neither the microphone nor
+         the camera has been granted: a muted listener still needs its process
+         kept out of the frozen state. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" tools:targetApi="q" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CAMERA" tools:targetApi="upside_down_cake" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" tools:targetApi="upside_down_cake" />
 
@@ -45,6 +49,28 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <!-- The live class. A WebRTC room lives inside this process, so once
+             the app is backgrounded an ordinary process may be frozen (audio
+             stops) or reclaimed. Holding a foreground service for as long as
+             the room is connected is what keeps it alive, and its ongoing
+             notification is the reminder that the class is still running.
+             It owns no media of its own: the one LiveKit Room stays in
+             LiveKitRoomManager. `stopWithTask` makes swiping the app away end
+             the session instead of leaving a microphone anchored to nothing. -->
+        <service
+            android:name=".data.session.ClassSessionService"
+            android:exported="false"
+            android:stopWithTask="true"
+            android:foregroundServiceType="microphone|camera|dataSync" />
+
+        <!-- Class recording happens on the phone, not on the server. Android
+             only allows a MediaProjection to be used while a service of this
+             type is in the foreground, which is why the recorder is a service. -->
+        <service
+            android:name=".data.recording.ScreenRecordService"
+            android:exported="false"
+            android:foregroundServiceType="mediaProjection" />
 
         <!-- An attendance register downloaded on the phone is shared from the
              app cache. Android 7+ refuses to hand a file:// URI to another app,

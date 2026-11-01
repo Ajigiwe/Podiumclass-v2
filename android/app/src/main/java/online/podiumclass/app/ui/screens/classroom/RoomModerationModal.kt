@@ -32,6 +32,7 @@ import online.podiumclass.app.ui.theme.*
 fun RoomModerationModal(
     isMutedAll: Boolean,
     autoApproveMic: Boolean,
+    autoApproveCamera: Boolean,
     permissionPolicy: PermissionPolicyDto,
     pendingRequests: List<PermissionRequestDto>,
     coHosts: List<CoHostDto>,
@@ -39,6 +40,7 @@ fun RoomModerationModal(
     onDismiss: () -> Unit,
     onToggleMuteAll: () -> Unit,
     onToggleSmartMic: (Boolean) -> Unit,
+    onToggleSmartCamera: (Boolean) -> Unit,
     onTogglePolicy: (kind: String) -> Unit,
     onReviewRequest: (requestId: String, approve: Boolean) -> Unit,
     onAppointCoHost: (userId: String) -> Unit,
@@ -212,6 +214,48 @@ fun RoomModerationModal(
                                         modifier = Modifier.height(28.dp)
                                     )
                                 }
+                            }
+
+                            // Smart Camera: the same bargain for the camera, kept
+                            // as its own switch -- a host who welcomes a voice
+                            // has not thereby welcomed a face.
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(12.dp))
+                                    .background(if (autoApproveCamera) IndigoPrimary.copy(alpha = 0.2f) else Color.White.copy(alpha = 0.08f))
+                                    .border(1.dp, if (autoApproveCamera) IndigoPrimary.copy(alpha = 0.4f) else CardBorder, RoundedCornerShape(12.dp))
+                                    .clickable { onToggleSmartCamera(!autoApproveCamera) }
+                                    .padding(horizontal = 12.dp, vertical = 8.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        text = "Smart Camera",
+                                        color = Color.White,
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                    Text(
+                                        text = "Approve camera asks automatically",
+                                        color = TextSecondary,
+                                        fontSize = 9.sp,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                }
+                                Switch(
+                                    checked = autoApproveCamera,
+                                    onCheckedChange = { onToggleSmartCamera(it) },
+                                    colors = SwitchDefaults.colors(
+                                        checkedThumbColor = Color.White,
+                                        checkedTrackColor = IndigoPrimary
+                                    ),
+                                    modifier = Modifier.height(28.dp)
+                                )
                             }
                         }
                     }

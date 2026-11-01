@@ -3,4 +3,8 @@
      the directory named here. -->
 <paths>
     <cache-path name="exports" path="exports/" />
+    <!-- Recordings on Android 8/9 live in the app's external Movies folder,
+         because the public one would need a storage permission. Sharing one is
+         a content:// URI scoped to that folder. -->
+    <external-files-path name="recordings" path="Movies/" />
 </paths>

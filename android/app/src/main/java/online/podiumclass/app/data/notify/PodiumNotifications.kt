@@ -12,6 +12,7 @@ import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
 import online.podiumclass.app.R
+import online.podiumclass.app.data.session.ClassSessionService
 import online.podiumclass.app.ui.MainActivity
 
 /**
@@ -34,8 +35,21 @@ object PodiumNotifications {
     /** A recording finished, failed, or is ready to download. */
     private const val CHANNEL_RECORDINGS = "podium_recordings"
 
+    /**
+     * The class running right now. Silent, pinned and never auto-cancelled:
+     * it is a status line, not an event, so it must not make a sound or be
+     * swiped away while the room is still open.
+     *
+     * Public because the notification itself is posted by
+     * [online.podiumclass.app.data.session.ClassSessionService], which is the
+     * foreground service holding the session open; this object only defines the
+     * channel it posts into.
+     */
+    const val LIVE_CHANNEL = "podium_class_live"
+
     private const val ID_RECORDING_READY = 2101
     private const val ID_RECORDING_FAILED = 2102
+    private const val ID_RECORDING_SAVED = 2105
     private const val ID_CLASS_ENDED = 2103
     private const val ID_REMOVED_FROM_CLASS = 2104
 
@@ -67,6 +81,19 @@ object PodiumNotifications {
                 description = "When a class recording is ready to watch or download."
             }
         )
+        manager.createNotificationChannel(
+            NotificationChannel(
+                LIVE_CHANNEL,
+                "Class in progress",
+                // LOW, so a class you are already sitting in never buzzes at
+                // you; it only sits in the shade with its clock.
+                NotificationManager.IMPORTANCE_LOW
+            ).apply {
+                description = "A reminder of the class you are in, shown while it runs."
+                setShowBadge(false)
+                enableVibration(false)
+            }
+        )
     }
 
     /** Whether a notification may actually be posted right now. */
@@ -87,6 +114,22 @@ object PodiumNotifications {
             append(". Open Records to watch or download it.")
         }
         post(context, CHANNEL_RECORDINGS, ID_RECORDING_READY, "Recording ready", body)
+    }
+
+    /**
+     * A recording taken on this phone finished and is already on its disk.
+     *
+     * There is no processing step to wait for: the file was written by the
+     * device, so the notification only has to say where it went.
+     */
+    fun recordingSaved(context: Context, title: String, length: String? = null) {
+        val body = buildString {
+            append(if (title.isBlank()) "Your class recording" else "\"$title\"")
+            append(" is saved on this phone")
+            if (!length.isNullOrBlank()) append(" — $length")
+            append(". Find it in Records, or in Movies/Podium.")
+        }
+        post(context, CHANNEL_RECORDINGS, ID_RECORDING_SAVED, "Recording saved", body)
     }
 
     /** The egress worker gave up; say so instead of leaving an empty shelf. */
@@ -113,6 +156,41 @@ object PodiumNotifications {
             append(". The room is closed until the host opens it again.")
         }
         post(context, CHANNEL_CLASSES, ID_CLASS_ENDED, "Class ended", body)
+    }
+
+    /**
+     * Hold the class that is running open, and pin it to the shade.
+     *
+     * The phone is the thing that stays in a pocket while a lecture goes on, so
+     * the reminder has to live outside the app -- and so does the connection.
+     * Both are [ClassSessionService]'s job: it posts an ongoing notification
+     * with a chronometer, and being a foreground service is what stops Android
+     * from freezing the process (and silencing the room) once this screen is
+     * backgrounded. This is only the entry point the classroom calls.
+     *
+     * [cameraPublishing] is passed through so the service can claim the camera
+     * foreground type only while a camera is actually on air.
+     */
+    fun startLiveClass(
+        context: Context,
+        title: String,
+        cameraPublishing: Boolean = false,
+        startedAtMillis: Long = System.currentTimeMillis()
+    ) {
+        ClassSessionService.start(context.applicationContext, title, cameraPublishing, startedAtMillis)
+    }
+
+    /**
+     * The class was renamed, the session loaded late, or the camera changed:
+     * same clock, new label. A no-op when no class is being held open.
+     */
+    fun updateLiveClass(context: Context, title: String, cameraPublishing: Boolean = false) {
+        ClassSessionService.update(context.applicationContext, title, cameraPublishing)
+    }
+
+    /** The class ended, the user left it, or the screen closed. */
+    fun stopLiveClass(context: Context) {
+        ClassSessionService.stop(context.applicationContext)
     }
 
     /** A moderator removed this person from the room. */

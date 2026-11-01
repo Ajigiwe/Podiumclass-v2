@@ -1,6 +1,7 @@
 package online.podiumclass.app.ui.screens.classroom
 
 import android.app.Application
+import android.content.Intent
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.Job
@@ -15,6 +16,8 @@ import online.podiumclass.app.data.api.PodiumApiService
 import online.podiumclass.app.data.api.models.*
 import online.podiumclass.app.data.livekit.LiveKitRoomManager
 import online.podiumclass.app.data.notify.PodiumNotifications
+import online.podiumclass.app.data.recording.LocalRecordingState
+import online.podiumclass.app.data.recording.ScreenRecordService
 import online.podiumclass.app.data.storage.TokenStorage
 
 class ClassroomViewModel(
@@ -42,6 +45,8 @@ class ClassroomViewModel(
     // Moderation & Permissions States
     val isMutedAll = MutableStateFlow(false)
     val autoApproveMic = MutableStateFlow(false)
+    // Smart Camera: its own switch, because clearing voices is not clearing faces.
+    val autoApproveCamera = MutableStateFlow(false)
     val permissionPolicy = MutableStateFlow(PermissionPolicyDto())
     val myPermissions = MutableStateFlow(PermissionGrantDto())
     val isCoHost = MutableStateFlow(false)
@@ -122,10 +127,12 @@ class ClassroomViewModel(
     private var autoCheckerJob: Job? = null
 
     // ==================== RECORDING ====================
-    // The MP4 is written by the server (LiveKit Egress), so this device only
-    // ever holds a *claim* about a recording: what the last status call said.
-    // Nothing here can make one exist, which is exactly why a phone can start
-    // one at all -- the work happens on the host machine, not on the handset.
+    // A host recording a class on the phone captures it *here*, into this
+    // phone's own storage, instead of asking the server to composite one. No
+    // server disk is used and nothing is uploaded, so the file stays with the
+    // host and a class costs the deployment nothing. `recordings` further down
+    // is still the server's shelf: those rows are recordings a *web* host
+    // started, which the worker composites.
     // Shared materials for this class. The list is server-backed, so a
     // student who joins late -- or reopens the app -- sees the same shelf as
     // everyone else, and a host's upload survives their refresh.
@@ -137,26 +144,52 @@ class ClassroomViewModel(
     val activeRecording = MutableStateFlow<RecordingDto?>(null)
     val recordingError = MutableStateFlow<String?>(null)
     val recordingSeconds = MutableStateFlow(0)
-    val isRecording: StateFlow<Boolean> = activeRecording
-        .map { it?.isLive == true }
+
+    /**
+     * What this phone's recorder is doing.
+     *
+     * The service owns the encoder, so it owns this state too: the button and
+     * the REC timer follow a file that is really being written on the disk,
+     * not a claim about one.
+     */
+    val localRecording: StateFlow<LocalRecordingState> = ScreenRecordService.state
+
+    val isRecording: StateFlow<Boolean> = localRecording
+        .map { it is LocalRecordingState.Recording }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, false)
+
+    /** Consent given, encoder not capturing yet: "Starting…", not "Stop". */
+    val isRecordingStarting: StateFlow<Boolean> = localRecording
+        .map { it is LocalRecordingState.Preparing }
         .stateIn(viewModelScope, SharingStarted.Eagerly, false)
 
     /**
-     * Accepted, but the worker's pipeline is not capturing yet.
+     * True while a recording started *on the server* (a web host) is running.
      *
-     * A composite pipeline needs a second or two to attach to the room. The
-     * server waits for it before stopping, so a stop is safe -- but the button
-     * should not invite one over a take that has not started, hence the
-     * "Starting..." state instead of the REC timer and the stop icon.
+     * Participants are shown "REC" off this, because it is the only recording
+     * they can be told about: a capture on the host's phone is private to that
+     * phone and is never announced to the room.
      */
-    val isRecordingStarting: StateFlow<Boolean> = activeRecording
-        .map { it?.status?.equals("starting", ignoreCase = true) == true }
+    val isRoomRecording: StateFlow<Boolean> = activeRecording
+        .map { it?.isLive == true }
         .stateIn(viewModelScope, SharingStarted.Eagerly, false)
 
     private var recordingClockJob: Job? = null
     private var recordingPollJob: Job? = null
 
-    private fun stopRecordingClock() {
+    private fun startLocalClock(startedAtMillis: Long) {
+        recordingSeconds.value =
+            ((System.currentTimeMillis() - startedAtMillis) / 1000).toInt().coerceAtLeast(0)
+        recordingClockJob?.cancel()
+        recordingClockJob = viewModelScope.launch {
+            while (true) {
+                delay(1000)
+                recordingSeconds.value += 1
+            }
+        }
+    }
+
+    private fun stopLocalClock() {
         recordingClockJob?.cancel()
         recordingClockJob = null
     }
@@ -164,18 +197,6 @@ class ClassroomViewModel(
     private fun stopRecordingPoll() {
         recordingPollJob?.cancel()
         recordingPollJob = null
-    }
-
-    /** Seconds since an ISO-8601 start stamp, or 0 when it cannot be read. */
-    private fun elapsedSince(iso: String?): Int {
-        if (iso == null) return 0
-        return try {
-            val start = java.time.OffsetDateTime.parse(iso).toInstant()
-            val seconds = java.time.Duration.between(start, java.time.Instant.now()).seconds
-            if (seconds < 0) 0 else seconds.toInt()
-        } catch (e: Exception) {
-            0
-        }
     }
 
     /**
@@ -190,7 +211,6 @@ class ClassroomViewModel(
         if (doc == null || !doc.isLive) {
             val wasLive = activeRecording.value != null
             activeRecording.value = null
-            stopRecordingClock()
             stopRecordingPoll()
             if (wasLive) {
                 // The poll just watched the worker finish, which is the moment
@@ -220,13 +240,6 @@ class ClassroomViewModel(
         activeRecording.value = doc
         if (wasLive) return
 
-        recordingSeconds.value = elapsedSince(doc.startedAt)
-        recordingClockJob = viewModelScope.launch {
-            while (true) {
-                delay(1000)
-                recordingSeconds.value += 1
-            }
-        }
         recordingPollJob = viewModelScope.launch {
             while (true) {
                 // While the pipeline is coming up the row changes in a second
@@ -360,44 +373,32 @@ class ClassroomViewModel(
         }
     }
 
-    /** Ask the server to record this room (server-side MP4). */
-    fun startRecording() {
-        viewModelScope.launch {
-            val client = api ?: return@launch
-            if (activeRecording.value != null) return@launch
-            recordingError.value = null
-            try {
-                applyActiveRecording(client.startRecording(sessionId).document)
-                loadRecordings()
-                pushSystemMessage("Recording started. The video file is written on the server.")
-            } catch (e: Exception) {
-                // 503 RECORDING_UNAVAILABLE is the honest answer when the worker
-                // is down; say so instead of leaving a dead button.
-                recordingError.value = serverMessage(e as? retrofit2.HttpException)
-                    ?: "Recording could not be started."
-                pushSystemMessage(recordingError.value ?: "Recording could not be started.")
-            }
-        }
+    /**
+     * Start capturing this class on the phone, with the consent just granted.
+     *
+     * The system prompt for screen capture is the only gate: there is no worker
+     * to wait for and no file on the server, so the recording is available the
+     * second it is stopped.
+     */
+    fun startLocalRecording(resultCode: Int, data: Intent) {
+        if (localRecording.value is LocalRecordingState.Recording) return
+        recordingError.value = null
+        ScreenRecordService.start(
+            getApplication(),
+            resultCode,
+            data,
+            _session.value?.title ?: "Class"
+        )
     }
 
-    /**
-     * Finish the recording cleanly. Egress answers "ending" and finalises the
-     * MP4 a moment later, so polling keeps running until the file is whole.
-     */
+    /** The user dismissed the system capture prompt: say so, then move on. */
+    fun onRecordingDeclined() {
+        pushSystemMessage("Recording needs permission to capture this screen.")
+    }
+
+    /** Close the file. The MP4 is on the phone already, so there is no wait. */
     fun stopRecording() {
-        viewModelScope.launch {
-            val client = api ?: return@launch
-            val id = activeRecording.value?.id ?: return@launch
-            recordingError.value = null
-            try {
-                applyActiveRecording(client.stopRecording(sessionId, id).document)
-                pushSystemMessage("Finishing the recording...")
-            } catch (e: Exception) {
-                recordingError.value = serverMessage(e as? retrofit2.HttpException)
-                    ?: "The recording could not be stopped."
-                pushSystemMessage(recordingError.value ?: "The recording could not be stopped.")
-            }
-        }
+        ScreenRecordService.stop(getApplication())
     }
 
     init {
@@ -468,6 +469,17 @@ class ClassroomViewModel(
         viewModelScope.launch {
             roomManager.onRoomClosed.collect { reason ->
                 roomClosed.value = reason
+                // The class is over: a phone recording started for it must not
+                // keep filming the dashboard. The file is closed cleanly, which
+                // means it is still playable.
+                if (localRecording.value is LocalRecordingState.Recording) {
+                    ScreenRecordService.stop(getApplication())
+                    pushSystemMessage("Recording saved to this phone.")
+                }
+                // The pinned "in class" reminder is now false, so it goes
+                // before the ended-notice replaces it.
+                PodiumNotifications.stopLiveClass(getApplication())
+
                 // The room went away under them: say so where the phone will
                 // show it, since the screen may already be off.
                 PodiumNotifications.classEnded(
@@ -482,6 +494,23 @@ class ClassroomViewModel(
         viewModelScope.launch {
             roomManager.mediaErrors.collect { message ->
                 pushSystemMessage(message)
+            }
+        }
+
+        // The phone's recorder reports through its service, so the REC timer
+        // and the button follow it even if the classroom was left and reopened.
+        viewModelScope.launch {
+            localRecording.collect { state ->
+                when (state) {
+                    is LocalRecordingState.Recording -> startLocalClock(state.startedAtMillis)
+                    LocalRecordingState.Preparing -> recordingSeconds.value = 0
+                    is LocalRecordingState.Failed -> {
+                        stopLocalClock()
+                        recordingError.value = state.message
+                        pushSystemMessage(state.message)
+                    }
+                    LocalRecordingState.Idle -> stopLocalClock()
+                }
             }
         }
     }
@@ -667,6 +696,7 @@ class ClassroomViewModel(
     fun applyModerationState(sessionDto: SessionDto) {
         isMutedAll.value = sessionDto.isMutedAll
         autoApproveMic.value = sessionDto.autoApproveMic
+        autoApproveCamera.value = sessionDto.autoApproveCamera
         permissionPolicy.value = sessionDto.permissions
         enforceLocks()
     }
@@ -675,6 +705,7 @@ class ClassroomViewModel(
         val wasMuted = isMutedAll.value
         packet.isMutedAll?.let { isMutedAll.value = it }
         packet.autoApproveMic?.let { autoApproveMic.value = it }
+        packet.autoApproveCamera?.let { autoApproveCamera.value = it }
         packet.permissions?.let { permissionPolicy.value = it }
         if (packet.isMutedAll != null && packet.isMutedAll != wasMuted) {
             val msg = if (packet.isMutedAll) "The host muted all microphones." else "The host unmuted microphones."
@@ -749,6 +780,7 @@ class ClassroomViewModel(
             roomManager.broadcastModeration(
                 isMutedAll = isMutedAll.value,
                 autoApproveMic = autoApproveMic.value,
+                autoApproveCamera = autoApproveCamera.value,
                 permissions = permissionPolicy.value
             )
             true
@@ -771,6 +803,12 @@ class ClassroomViewModel(
     fun setAutoApproveMic(enabled: Boolean) {
         viewModelScope.launch {
             persistModeration(PatchSessionRequest(autoApproveMic = enabled))
+        }
+    }
+
+    fun setAutoApproveCamera(enabled: Boolean) {
+        viewModelScope.launch {
+            persistModeration(PatchSessionRequest(autoApproveCamera = enabled))
         }
     }
 
@@ -917,6 +955,10 @@ class ClassroomViewModel(
             val client = api ?: return@launch
             try {
                 client.endSession(sessionId)
+                // Close the host's own recording too, before the room goes away.
+                if (localRecording.value is LocalRecordingState.Recording) {
+                    ScreenRecordService.stop(getApplication())
+                }
                 pushSystemMessage("The classroom session has ended.")
                 delay(500)
                 roomManager.disconnect()
@@ -1108,6 +1150,11 @@ class ClassroomViewModel(
 
     override fun onCleared() {
         super.onCleared()
+        // Leaving the classroom ends the capture: it was a recording of this
+        // class, not of whatever the phone does next.
+        if (localRecording.value is LocalRecordingState.Recording) {
+            ScreenRecordService.stop(getApplication())
+        }
         autoCheckerJob?.cancel()
         viewModelScope.launch {
             roomManager.disconnect()
