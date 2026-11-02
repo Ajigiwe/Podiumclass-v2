@@ -83,6 +83,20 @@ if ! command -v "$PYTHON" >/dev/null 2>&1; then
 fi
 "$PYTHON" deploy/render-config.py
 
+# --- Caddyfile ---------------------------------------------------------------
+# Caddy exits on a syntax error, so a bad edit here takes the whole site down at
+# the next restart -- and `up -d` still reports success, because the container
+# just restart-loops. Validate with the same image that will run it, before the
+# running stack is touched: if this fails, the old config keeps serving.
+if ! caddy_check="$(docker run --rm \
+        -e ACME_EMAIL="${ACME_EMAIL:-example@example.com}" \
+        -v "$PWD/deploy/Caddyfile:/etc/caddy/Caddyfile:ro" \
+        caddy:2-alpine caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile 2>&1)"; then
+    echo "$caddy_check" >&2
+    echo "deploy/Caddyfile failed validation; leaving the running stack alone." >&2
+    exit 1
+fi
+
 # --- build and start --------------------------------------------------------
 echo "Building images and starting the stack..."
 "${COMPOSE[@]}" up -d --build --remove-orphans

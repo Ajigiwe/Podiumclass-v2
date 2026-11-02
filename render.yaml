@@ -47,13 +47,23 @@ services:
     # `ensure_admin` exists because a free instance has no Shell, so
     # createsuperuser cannot be run by hand; it does nothing unless the
     # DJANGO_ADMIN_* variables are set.
-    startCommand: "python manage.py migrate --noinput && python manage.py ensure_admin && gunicorn config.wsgi:application --bind 0.0.0.0:$PORT --workers 2 --threads 4 --timeout 120 --access-logfile -"
+    # gunicorn.conf.py reads PORT, so the bind address still comes from Render.
+    startCommand: "python manage.py migrate --noinput && python manage.py ensure_admin && gunicorn config.wsgi:application --config gunicorn.conf.py"
     # Readiness, not liveness: it checks the database and pending migrations, so
     # a deploy that cannot reach Postgres never replaces a working instance.
     healthCheckPath: /health/ready
     envVars:
       - key: PYTHON_VERSION
         value: 3.12.3
+      # Two processes is what a 512MB free instance can hold: each worker costs
+      # roughly 80-100MB resident. Raise this (and the plan) together with the
+      # instance size -- 2 x CPU + 1 is the ceiling, not a target.
+      - key: WEB_CONCURRENCY
+        value: "2"
+      # Render's proxy allows long requests; recordings are streamed from the
+      # same process, so the timeout is generous rather than gunicorn's 30s.
+      - key: GUNICORN_TIMEOUT
+        value: "120"
       - key: DJANGO_DEBUG
         value: "False"
       - key: DJANGO_SECRET_KEY

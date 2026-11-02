@@ -231,6 +231,31 @@ else:
         }
     }
 
+# Persistent database connections.
+#
+# Django's default (CONN_MAX_AGE = 0) closes the connection at the end of every
+# request, so each request pays a TCP connect + authentication before doing any
+# work. Measured in loadtest/RESULTS.md on the classroom polling path (50 req/s,
+# 200 students):
+#
+#     CONN_MAX_AGE = 0   -> 30 of 50 rps, p50 5.3s, p99 10.2s
+#     CONN_MAX_AGE = 60  -> 50 of 50 rps, p50 33ms, p99 0.7s
+#
+# The endpoint work is unchanged in both runs; the difference is connection
+# churn. It scales with database latency, which is why it bites hardest on a
+# managed/remote Postgres rather than a local socket.
+#
+# `CONN_HEALTH_CHECKS` makes a reused connection prove it is still alive before
+# a request uses it, so a database restart costs one slow request instead of
+# erroring every request served by a worker holding a dead connection.
+#
+# Overridable for the one case that needs the old behaviour: a database behind
+# a pooler with a short idle timeout (PgBouncer in transaction mode), where
+# holding connections open is the pooler's job. Set DB_CONN_MAX_AGE=0 there.
+DB_CONN_MAX_AGE = int(os.getenv('DB_CONN_MAX_AGE', '60' if USE_POSTGRES else '0'))
+DATABASES['default']['CONN_MAX_AGE'] = DB_CONN_MAX_AGE
+DATABASES['default']['CONN_HEALTH_CHECKS'] = DB_CONN_MAX_AGE > 0
+
 AUTH_USER_MODEL = 'accounts.User'
 
 AUTH_PASSWORD_VALIDATORS = [

@@ -1,9 +1,17 @@
-# Reverse proxy and TLS for the whole deployment.
+# Reverse proxy, TLS and load balancing for the whole deployment.
 #
 # Caddy is used instead of nginx+certbot because it obtains and renews
 # Let's Encrypt certificates by itself: there is no cron job to forget and no
 # renewal that silently lapses after three months. It also reuses the same ports
 # for the app and the LiveKit signalling host, so only 80/443 need to be public.
+#
+# It is also the load balancer for the API. Docker's embedded DNS answers with
+# every replica address for the `backend` service, and Caddy spreads requests
+# across them (`lb_policy`) while taking unhealthy replicas out of rotation
+# (`health_uri`). That is why /api, /admin and /health are routed here instead
+# of being proxied through nginx: nginx can only balance across a static list of
+# upstreams (the `resolve` directive is nginx Plus), so a scaled backend behind
+# it would silently keep hitting whichever replica it resolved at boot.
 #
 # Domains come from the environment (deploy/.env), never from this file.
 {
@@ -13,28 +21,69 @@
 	# acme_ca https://acme-staging-v02.api.letsencrypt.org/directory
 }
 
-# The web app and the API share this hostname. nginx inside the frontend
-# container forwards /api, /admin, /static and /health to Django, which is why
-# the browser never makes a cross-origin request.
+# The web app and the API share this hostname. The browser never makes a
+# cross-origin request -- Caddy splits the two paths below -- so the deployment
+# needs no CORS allowlist and Django's admin cookies work unchanged.
 {$APP_DOMAIN} {
 	# Uploads are capped at 100MB by the backend; this is the outer limit.
 	request_body {
 		max_size 120MB
 	}
 
-	reverse_proxy frontend:80 {
-		# Pass the real scheme so Django's SECURE_PROXY_SSL_HEADER sees https.
-		header_up X-Forwarded-Proto https
+	# API, admin and the health probes. `/static/` is deliberately NOT here:
+	# nginx serves it from disk, and sending it to Python would put a static
+	# file on the same worker pool the classroom polling needs.
+	@api path /api/* /admin/* /health /health/*
+	handle @api {
+		reverse_proxy backend:8000 {
+			# Even spread: the classroom path is latency-sensitive and every
+			# replica is identical, so there is nothing to gain from hashing
+			# or sticky sessions.
+			lb_policy round_robin
+
+			# Liveness, not readiness: a replica that cannot reach Postgres
+			# would be ejected by /health/ready and then never recover, because
+			# Caddy only re-adds a host whose probe passes. /health/live answers
+			# "this process can serve a request", which is the question a load
+			# balancer is actually asking.
+			health_uri /health/live
+			health_interval 10s
+			health_timeout 3s
+			health_status 200
+
+			# The browser reached us over TLS; Django needs to see https or its
+			# CSRF checks and absolute URLs come out as http.
+			header_up X-Forwarded-Proto https
+
+			# Recording start/stop is a long-lived request from Django; give it
+			# room instead of the 30s default.
+			transport http {
+				read_timeout 300s
+				write_timeout 300s
+			}
+		}
+	}
+
+	handle {
+		reverse_proxy frontend:80 {
+			# Pass the real scheme so Django's SECURE_PROXY_SSL_HEADER sees https.
+			header_up X-Forwarded-Proto https
+		}
 	}
 }
 
 # LiveKit signalling only (wss://.../rtc). Media does NOT flow through here:
 # the browser and the server exchange audio/video directly over TCP 7881 and
 # UDP 50000-50100, which must be open on the VPS firewall.
+#
+# This is one LiveKit server, and that is a deliberate limit rather than an
+# oversight: an SFU holds one room's media graph in one process, so a second
+# LiveKit instance would split rooms across boxes, not share the load of one
+# room. Capacity is raised by the UDP port range and bandwidth, not by adding
+# instances behind this proxy.
 {$LIVEKIT_DOMAIN} {
 	reverse_proxy livekit:7880 {
 		header_up X-Forwarded-Proto https
-		# Recording start/stop is a long-lived request from Django; give it room.
 		transport http {
 			read_timeout 300s
 			write_timeout 300s

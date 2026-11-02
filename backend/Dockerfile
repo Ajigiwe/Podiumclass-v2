@@ -37,14 +37,11 @@ EXPOSE 8000
 # Windows.
 ENTRYPOINT ["sh", "./entrypoint.sh"]
 
-CMD ["gunicorn", "config.wsgi:application", \
-     "--bind", "0.0.0.0:8000", \
-     "--workers", "3", \
-     "--threads", "2", \
-     "--timeout", "60", \
-     "--graceful-timeout", "30", \
-     "--access-logfile", "-", \
-     "--error-logfile", "-"]
+# Worker sizing lives in gunicorn.conf.py so the image, Render and a scaled
+# Compose deployment read one set of numbers (WEB_CONCURRENCY, GUNICORN_THREADS).
+# `--workers 3` was three single-threaded processes: three concurrent requests
+# for the whole API while 200 students poll it every four seconds.
+CMD ["gunicorn", "config.wsgi:application", "--config", "gunicorn.conf.py"]
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=40s --retries=3 \
     CMD ["python", "-c", "import sys,urllib.request; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/health/live', timeout=4).status == 200 else 1)"]
