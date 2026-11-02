@@ -109,6 +109,26 @@ remote/managed Postgres with TLS is where it turns into a hard ceiling.
 5. **LiveKit sizing.** 200 participants publishing video in one room is not a
    configuration to plan around; audience/publish-on-invite is.
 
+## Update — the client-side fixes have landed
+
+Items 1 and 2 of the list above are in the code now, so the "2 px tile" row no
+longer describes what ships:
+
+- **The grid is capped.** At most 12 tiles on desktop and 6 on mobile, plus a
+  single "+N others" tile that opens the participant list. Ranking keeps the
+  viewer's own tile, screen shares, the host and anyone with video or a raised
+  hand, and is built from slow-moving signals only so talking does not
+  reshuffle the grid (`ClassroomView.vue`, `tileCap` / `tileRank`).
+- **Updates no longer replace the array.** `syncRoster` reconciles into the tile
+  objects already on screen instead of allocating one per participant, and only
+  re-binds a `<video>` whose track actually changed. Ref callbacks are stable
+  per participant, so Vue stops detaching and re-attaching every video on each
+  render (`stores/classroom.ts`).
+
+The numbers in this document are the baseline those changes were written
+against and were measured before them. They have **not** been re-measured on a
+200-participant room since; treat the re-render figures as the "before" side.
+
 ## Not covered by this run
 
 - LiveKit signalling, TURN/ICE and media bandwidth with 200 real endpoints.

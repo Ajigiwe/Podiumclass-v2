@@ -427,7 +427,7 @@
               <div class="flex-1 w-full h-full relative overflow-hidden bg-gradient-to-br from-[#1A2032] via-[#121722] to-[#0E1119] flex items-center justify-center">
                 <video
                   v-if="(spotlightParticipant?.isLocal && (classroomStore.isCameraEnabled || classroomStore.isScreenSharing)) || spotlightParticipant?.hasScreenShare || spotlightParticipant?.hasVideo"
-                  :ref="(el) => setVideo(spotlightParticipant?.identity || '', el)"
+                  :ref="videoRef(spotlightParticipant?.identity || '')"
                   :data-identity="spotlightParticipant?.identity"
                   autoplay
                   playsinline
@@ -505,7 +505,7 @@
                 >
                   <video
                     v-if="(p.isLocal && (classroomStore.isCameraEnabled || classroomStore.isScreenSharing)) || p.hasScreenShare || p.hasVideo"
-                    :ref="(el) => setVideo(p.identity, el)"
+                    :ref="videoRef(p.identity)"
                     :data-identity="p.identity"
                     autoplay
                     playsinline
@@ -566,7 +566,7 @@
                   <!-- Video feed (camera or screen share) -->
                   <video
                     v-if="(p.isLocal && (classroomStore.isCameraEnabled || classroomStore.isScreenSharing)) || p.hasScreenShare || p.hasVideo"
-                    :ref="(el) => setVideo(p.identity, el)"
+                    :ref="videoRef(p.identity)"
                     :data-identity="p.identity"
                     autoplay
                     playsinline
@@ -2232,6 +2232,26 @@ function handleVisibilityChange() {
 // LiveKit track gets attached/detached imperatively.
 function setVideo(identity: string, el: any) {
   classroomStore.setVideoElement(identity, el as HTMLVideoElement | null);
+}
+
+/**
+ * Stable per-participant ref callback.
+ *
+ * `:ref="videoRef(p.identity)"` builds a new function on every
+ * render, and Vue reads a changed ref function as an unmount plus a mount: it
+ * calls the old one with null and the new one with the element. The store then
+ * detaches and re-attaches the LiveKit track, so in a busy room every tile
+ * restarted its video on every roster update. One function per identity keeps
+ * the binding stable and fires only when the element really appears or goes.
+ */
+const videoRefBinders = new Map<string, (el: any) => void>();
+function videoRef(identity: string) {
+  let binder = videoRefBinders.get(identity);
+  if (!binder) {
+    binder = (el: any) => setVideo(identity, el);
+    videoRefBinders.set(identity, binder);
+  }
+  return binder;
 }
 
 // How many tiles the grid will ever draw. A class can hold hundreds of

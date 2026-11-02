@@ -635,10 +635,50 @@ export const useClassroomStore = defineStore('classroom', () => {
     attachToElement(identity);
   }
 
-  /** Rebuild the roster from the live room state (local + remote participants). */
+  /** The fields that can change while a participant stays in the room. */
+  const TILE_FIELDS = [
+    'name',
+    'role',
+    'isSpeaking',
+    'hasVideo',
+    'hasScreenShare',
+    'isMicOn',
+    'isHandRaised',
+  ] as const;
+
+  /**
+   * Reconcile the roster with the room, reusing the tile objects already on
+   * screen.
+   *
+   * This used to allocate a fresh object for every participant and assign a new
+   * array on every roster event. In a 200-person class one mic change therefore
+   * replaced 200 objects, every tile's bindings compared unequal and the whole
+   * grid re-patched -- measured at 24ms per update with 25 of 60 frames over
+   * 32ms (loadtest/RESULTS.md).
+   *
+   * Mutating the object that is already rendered narrows that to the field that
+   * actually moved, and the array itself is only replaced when somebody joined,
+   * left or reordered -- which is the only thing that can change the visible set.
+   */
   function syncRoster(r: Room, localName: string, localRole: string) {
-    const tiles: ParticipantTile[] = [];
     const handSet = new Set(raisedHands.value.map((h) => h.identity));
+    const previous = new Map(participants.value.map((p) => [p.identity, p]));
+    const next: ParticipantTile[] = [];
+
+    /** Keep the rendered object when it exists; copy over only what moved. */
+    function reconcile(tile: ParticipantTile) {
+      const existing = previous.get(tile.identity);
+      if (!existing) {
+        next.push(tile);
+        return;
+      }
+      const target = existing as Record<string, unknown>;
+      const source = tile as unknown as Record<string, unknown>;
+      for (const field of TILE_FIELDS) {
+        if (target[field] !== source[field]) target[field] = source[field];
+      }
+      next.push(existing);
+    }
 
     const local = r.localParticipant;
     const localMedia = mediaFor(local.identity);
@@ -659,7 +699,7 @@ export const useClassroomStore = defineStore('classroom', () => {
     const hasLocalCam = !!localCamTrack || isCameraEnabled.value || !!localStream.value;
     const hasLocalScreen = !!localScreenTrack || isScreenSharing.value || !!localScreenStream.value;
 
-    tiles.push({
+    reconcile({
       identity: local.identity,
       name: localName,
       role: localRole,
@@ -676,7 +716,7 @@ export const useClassroomStore = defineStore('classroom', () => {
       const m = mediaFor(p.identity);
       m.camera = findVideoTrack(p, Track.Source.Camera);
       m.screen = findVideoTrack(p, Track.Source.ScreenShare);
-      tiles.push({
+      reconcile({
         identity: p.identity,
         name: meta.name || p.name || p.identity,
         role: meta.role || 'student',
@@ -689,11 +729,20 @@ export const useClassroomStore = defineStore('classroom', () => {
       });
     });
 
-    participants.value = tiles;
+    // Replace the array only when its contents or order changed. A roster
+    // event that moved one boolean has already been applied to the rendered
+    // tile above, so assigning here would only queue another full render.
+    const sameList =
+      next.length === participants.value.length &&
+      next.every((tile, index) => tile === participants.value[index]);
+    if (!sameList) participants.value = next;
 
-    // Re-bind any already-mounted <video> elements to the refreshed tracks.
+    // Re-bind only elements whose track actually changed. Re-attaching every
+    // mounted <video> on every roster event restarted playback on tiles that
+    // had nothing new to show.
     for (const identity of videoElements.keys()) {
-      attachToElement(identity);
+      const m = mediaByIdentity.get(identity);
+      if (m && m.attached !== pickTrack(m)) attachToElement(identity);
     }
   }
 
